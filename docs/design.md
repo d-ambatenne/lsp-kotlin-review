@@ -7,24 +7,25 @@
 │  VS Code                                                 │
 │  ┌────────────────────────────────────────────────────┐  │
 │  │  Extension (TypeScript)                            │  │
-│  │  - LanguageClient (vscode-languageclient)          │  │
+│  │  - LanguageClient (vscode-languageclient ^9.0.1)   │  │
 │  │  - Activation: onLanguage:kotlin                   │  │
-│  │  - Java runtime detection                          │  │
+│  │  - Java runtime detection (17+)                    │  │
 │  └──────────────┬─────────────────────────────────────┘  │
 │                 │ stdio (LSP JSON-RPC)                    │
 │  ┌──────────────▼─────────────────────────────────────┐  │
-│  │  Language Server (Kotlin/JVM)                      │  │
+│  │  Language Server (Kotlin/JVM 17)                   │  │
 │  │  ┌──────────────────────────────────────────────┐  │  │
-│  │  │  LSP4J (protocol layer)                      │  │  │
+│  │  │  LSP4J 0.24.0 (protocol layer)              │  │  │
 │  │  ├──────────────────────────────────────────────┤  │  │
 │  │  │  Feature Providers (P0 + P1)                 │  │  │
 │  │  ├──────────────────────────────────────────────┤  │  │
-│  │  │  CompilerFacade ← AnalysisApiCompilerFacade   │  │  │
+│  │  │  CompilerFacade ← AnalysisApiCompilerFacade  │  │  │
+│  │  │       Kotlin Analysis API 2.1.0 (K2/FIR)    │  │  │
 │  │  ├──────────────────────────────────────────────┤  │  │
 │  │  │  Build System Resolver          ┌─────────┐ │  │  │
 │  │  │  ┌─────────┬────────┬─────────┐ │ Manual  │ │  │  │
 │  │  │  │ Gradle  │ Maven  │ Bazel   │ │(fallbk) │ │  │  │
-│  │  │  │  (v1)   │  (v2)  │  (v2)   │ │         │ │  │  │
+│  │  │  │  (impl) │(future)│(future) │ │         │ │  │  │
 │  │  │  └─────────┴────────┴─────────┘ └─────────┘ │  │  │
 │  │  └──────────────────────────────────────────────┘  │  │
 │  └────────────────────────────────────────────────────┘  │
@@ -42,31 +43,34 @@ lsp-kotlin-review/
 │   │   └── config.ts                # Extension settings
 │   ├── package.json                 # Extension manifest + contributes
 │   ├── tsconfig.json
-│   └── esbuild.mjs                  # Bundle config
+│   ├── esbuild.mjs                  # Bundle config
+│   ├── icon.png                     # Marketplace icon (128x128)
+│   └── .vscodeignore                # Exclude dev files from VSIX
 ├── server/                          # Language server (Kotlin)
 │   ├── src/main/kotlin/
 │   │   └── dev/review/lsp/
 │   │       ├── Server.kt            # Entry point, stdio setup
-│   │       ├── KotlinLanguageServer.kt  # LSP4J server impl
-│   │       ├── KotlinTextDocumentService.kt  # Document operations
-│   │       ├── KotlinWorkspaceService.kt     # Workspace operations
+│   │       ├── KotlinLanguageServer.kt  # LSP4J server impl, lifecycle, file watchers
+│   │       ├── KotlinTextDocumentService.kt  # Document operations, debounce, providers
+│   │       ├── KotlinWorkspaceService.kt     # Workspace operations, build file detection
 │   │       ├── buildsystem/
 │   │       │   ├── BuildSystemProvider.kt    # SPI interface
-│   │       │   ├── BuildSystemResolver.kt    # Detection + dispatch
+│   │       │   ├── BuildSystemResolver.kt    # Detection + dispatch + error fallback
 │   │       │   ├── ProjectModel.kt           # Unified model
 │   │       │   ├── gradle/
-│   │       │   │   └── GradleProvider.kt     # Gradle Tooling API (v1)
+│   │       │   │   └── GradleProvider.kt     # Gradle Tooling API 8.12
 │   │       │   └── manual/
 │   │       │       └── ManualProvider.kt     # Fallback: source-only
 │   │       ├── compiler/
-│   │       │   ├── CompilerFacade.kt         # Our stable interface
+│   │       │   ├── CompilerFacade.kt         # Our stable interface (12 methods)
+│   │       │   ├── StubCompilerFacade.kt     # No-op impl for testing
 │   │       │   ├── Types.kt                  # ResolvedSymbol, TypeInfo, etc.
 │   │       │   └── analysisapi/
 │   │       │       └── AnalysisApiCompilerFacade.kt  # K2/FIR implementation
 │   │       ├── analysis/
-│   │       │   ├── AnalysisSession.kt    # Session lifecycle, owns CompilerFacade
+│   │       │   ├── AnalysisSession.kt    # Session lifecycle, rebuild on build changes
 │   │       │   ├── FileIndex.kt          # Symbol/file index
-│   │       │   └── DiagnosticsPublisher.kt
+│   │       │   └── DiagnosticsPublisher.kt  # Version-aware diagnostic publishing
 │   │       ├── features/
 │   │       │   ├── DefinitionProvider.kt
 │   │       │   ├── ReferencesProvider.kt
@@ -80,13 +84,22 @@ lsp-kotlin-review/
 │   │       └── util/
 │   │           ├── PositionConverter.kt  # LSP <-> compiler positions
 │   │           └── UriUtil.kt
+│   ├── src/test/kotlin/              # 48 tests across 15 files
+│   ├── src/test/resources/           # Test fixtures (single-module, multi-module, no-build-system)
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
 ├── scripts/
-│   ├── build.sh                     # Full build (server + client)
-│   └── package.sh                   # Create VSIX
+│   ├── build.sh                     # Full build (server + client + copy JAR)
+│   └── package.sh                   # Build + create VSIX
+├── .github/
+│   └── workflows/
+│       ├── ci.yml                   # Java 17/21 × macOS/Linux matrix
+│       └── release.yml              # Tag push → build → publish to Marketplace
+├── .gitignore
 ├── .vscodeignore                    # Exclude dev files from VSIX
-├── package.json                     # Root: workspace + vsce config
+├── package.json                     # Root: workspace scripts
+├── CONTRIBUTING.md
+├── CHANGELOG.md
 └── README.md
 ```
 
@@ -95,13 +108,19 @@ lsp-kotlin-review/
 ### 1. VS Code Client (`client/`)
 
 **Responsibilities:**
-- Detect Java runtime (JAVA_HOME, PATH, settings override)
-- Spawn server JAR as child process via stdio
+- Detect Java runtime (settings → JAVA_HOME → JDK_HOME → PATH)
+- Validate Java version >= 17
+- Spawn server JAR as child process via stdio with default JVM flags
 - Register LanguageClient with document selectors for `kotlin`
-- Surface settings: java path, server JVM args, log level
+- Surface settings: java path, server JVM args, trace level
+
+**Default JVM flags** (set in `extension.ts`):
+```
+-Xmx512m -XX:+UseG1GC -XX:+TieredCompilation -XX:TieredStopAtLevel=1
+```
 
 **Key dependencies:**
-- `vscode-languageclient` ^9.x
+- `vscode-languageclient` ^9.0.1
 - `vscode` engine ^1.75.0
 
 **package.json contributes:**
@@ -109,7 +128,7 @@ lsp-kotlin-review/
 {
   "languages": [{ "id": "kotlin", "extensions": [".kt", ".kts"] }],
   "configuration": {
-    "kotlinReview.java.home": "Path to Java runtime",
+    "kotlinReview.java.home": "Path to Java runtime (17+)",
     "kotlinReview.server.jvmArgs": "Additional JVM arguments",
     "kotlinReview.trace.server": "off | messages | verbose"
   }
@@ -122,28 +141,47 @@ lsp-kotlin-review/
 - Implement LSP protocol via LSP4J
 - Manage Kotlin compiler analysis sessions
 - Provide all P0 + P1 features
+- Register file watchers for build files and trigger session rebuild
 
-**Key dependencies:**
-- `org.eclipse.lsp4j` - LSP protocol implementation for JVM
-- `org.jetbrains.kotlin:analysis-api` - Kotlin Analysis API (core interfaces)
-- `org.jetbrains.kotlin:analysis-api-standalone` - Standalone session setup (no IntelliJ)
-- `org.jetbrains.kotlin:analysis-api-fir` - K2/FIR backend implementation
-- `org.jetbrains.kotlin:kotlin-compiler-embeddable` - Transitive dep (PSI infrastructure)
+**Key dependencies (actual, from build.gradle.kts):**
+- `org.eclipse.lsp4j:org.eclipse.lsp4j:0.24.0` — LSP protocol
+- `org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0` — async operations
+- 10 Kotlin Analysis API `-for-ide` artifacts at 2.1.0 (all `isTransitive = false`):
+  - `analysis-api-standalone-for-ide`, `analysis-api-for-ide`, `analysis-api-k2-for-ide`
+  - `analysis-api-platform-interface-for-ide`, `analysis-api-impl-base-for-ide`
+  - `low-level-api-fir-for-ide`, `symbol-light-classes-for-ide`
+  - `kotlin-compiler-common-for-ide`, `kotlin-compiler-fir-for-ide`, `kotlin-compiler-ir-for-ide`
+- 11 IntelliJ Platform artifacts at 243.21565.193 (all `isTransitive = false`):
+  - `core`, `core-impl`, `extensions`, `util`, `util-base`, `util-rt`
+  - `util-class-loader`, `util-text-matching`, `util-xml-dom`
+  - `java-psi`, `java-psi-impl`
+- `org.gradle:gradle-tooling-api:8.12` — Gradle project resolution
+- `org.jetbrains.kotlinx:kotlinx-collections-immutable-jvm:0.3.8`
+
+**Important: All `-for-ide` artifacts require `isTransitive = false`** because their POMs reference unpublished internal JetBrains module names that don't exist as Maven artifacts.
+
+**Maven repositories required:**
+- Maven Central
+- `packages.jetbrains.team/maven/p/kt/kotlin-ide-plugin-dependencies` — Analysis API artifacts
+- `www.jetbrains.com/intellij-repository/releases` — IntelliJ Platform
+- `packages.jetbrains.team/maven/p/ij/intellij-dependencies` — IntelliJ dependencies
+- `repo.gradle.org/gradle/libs-releases` — Gradle Tooling API
 
 **Server lifecycle:**
-1. `initialize` → configure capabilities, set workspace root
-2. `initialized` → detect build system, resolve ProjectModel (async), start indexing
-3. `textDocument/didOpen` → analyze file, publish diagnostics
-4. `textDocument/didChange` → re-analyze, update diagnostics
-5. `workspace/didChangeWatchedFiles` → if build file changed, re-resolve ProjectModel
-6. `shutdown` → release compiler resources
-7. `exit` → terminate JVM
+1. `initialize` → configure capabilities (all P0+P1), set workspace root
+2. `initialized` → detect build system (async), resolve ProjectModel, create AnalysisSession, wire providers, register file watchers for build files
+3. `textDocument/didOpen` → update file content, publish diagnostics (version-tracked)
+4. `textDocument/didChange` → update file content, debounced diagnostics (250ms)
+5. `textDocument/didClose` → clear diagnostics, remove version tracking
+6. `workspace/didChangeWatchedFiles` → if build file changed, rebuild session (re-resolve ProjectModel, dispose old facade, create new facade, rewire providers)
+7. `shutdown` → dispose analysis session, shut down debounce scheduler, cancel coroutine scope
+8. `exit` → terminate JVM
 
 ### 3. Build System Integration (`server/.../buildsystem/`)
 
 Pluggable architecture for resolving project classpath and source roots from any JVM build system.
 
-**Unified project model — what every provider must produce:**
+**Unified project model:**
 ```kotlin
 data class ProjectModel(
     val modules: List<ModuleInfo>
@@ -151,337 +189,318 @@ data class ProjectModel(
 
 data class ModuleInfo(
     val name: String,
-    val sourceRoots: List<Path>,        // src/main/kotlin, src/main/java, ...
-    val testSourceRoots: List<Path>,    // src/test/kotlin, ...
-    val classpath: List<Path>,          // resolved dependency JARs
+    val sourceRoots: List<Path>,
+    val testSourceRoots: List<Path>,
+    val classpath: List<Path>,
     val testClasspath: List<Path>,
-    val kotlinVersion: String?,         // if detectable
-    val jvmTarget: String?              // e.g. "17"
+    val kotlinVersion: String?,
+    val jvmTarget: String?
 )
 ```
 
 **Provider SPI:**
 ```kotlin
 interface BuildSystemProvider {
-    /** Unique ID: "gradle", "maven", "bazel", etc. */
     val id: String
-
-    /** Files that indicate this build system is in use */
     val markerFiles: List<String>
-
-    /** Priority when multiple build systems detected (higher wins) */
     val priority: Int
-
-    /** Resolve full project model from workspace root */
     suspend fun resolve(workspaceRoot: Path): ProjectModel
-
-    /** Re-resolve a single module (for incremental updates) */
     suspend fun resolveModule(workspaceRoot: Path, moduleName: String): ModuleInfo
 }
 ```
 
-**BuildSystemResolver — detection and dispatch:**
+**BuildSystemResolver — detection, dispatch, and error fallback:**
 ```kotlin
 class BuildSystemResolver(
-    private val providers: List<BuildSystemProvider>  // loaded via ServiceLoader
+    private val providers: List<BuildSystemProvider> = listOf(GradleProvider())
 ) {
-    fun detect(workspaceRoot: Path): BuildSystemProvider?
-    suspend fun resolve(workspaceRoot: Path): ProjectModel
+    fun detect(workspaceRoot: Path): BuildSystemProvider
+    suspend fun resolve(workspaceRoot: Path): Pair<BuildSystemProvider, ProjectModel>
+    // If a provider fails, falls back to ManualProvider with a log message
 }
 ```
 
 Detection logic:
 1. Scan workspace root for marker files
-2. If multiple match, pick by priority (e.g. Gradle > Maven if both present)
+2. If multiple match, pick by priority (Gradle = 10, Manual = 0)
 3. If none match, fall back to `ManualProvider` (source-only, no classpath)
-4. Notify user via LSP `window/showMessage` which build system was detected
+4. If detected provider fails (e.g. Gradle can't connect), fall back to ManualProvider
+5. Log detected build system via LSP `window/logMessage`
 
-**Providers — implementation plan:**
+**Providers — implementation status:**
 
 | Provider | Marker Files | Strategy | Status |
 |---|---|---|---|
-| `GradleProvider` | `build.gradle.kts`, `build.gradle`, `settings.gradle.kts` | Gradle Tooling API — query `IdeaProject` model for source sets + classpath | **v1 (ship)** |
+| `GradleProvider` | `build.gradle.kts`, `build.gradle`, `settings.gradle.kts`, `settings.gradle` | Gradle Tooling API — query `IdeaProject` model for source sets + classpath. Per-module error handling (skips failed modules). | **Implemented** |
 | `MavenProvider` | `pom.xml` | Shell out to `mvn dependency:build-classpath` + parse POM for source dirs | **future** |
 | `BazelProvider` | `WORKSPACE`, `WORKSPACE.bazel`, `MODULE.bazel` | Shell out to `bazel query` + `bazel cquery` for deps | **future** |
-| `BuckProvider` | `.buckconfig`, `BUCK` | Shell out to `buck2 audit classpath` | **future** |
-| `MillProvider` | `build.sc` | Shell out to `mill show _.sources` + `mill show _.compileClasspath` | **future** |
-| `AmperProvider` | `module.yaml` (Amper format) | Parse Amper YAML config directly (simple declarative format) | **future** |
-| `ManualProvider` | *(fallback)* | Scan for `src/` dirs, no classpath. Warn user about missing deps | **always** |
+| `ManualProvider` | *(fallback)* | Scan for `src/main/kotlin`, `src/main/java`, `src/test/kotlin`, `src/kotlin`, `src`. No classpath. | **Implemented** |
 
-**Caching & refresh:**
-- Cache `ProjectModel` after first resolution
-- Re-resolve on: `build.gradle.kts` changed (file watcher), explicit user command, or LSP `workspace/didChangeWatchedFiles`
-- Resolution runs on Index thread (async, non-blocking)
-
-**Repository structure addition:**
-```
-server/src/main/kotlin/dev/review/lsp/
-├── buildsystem/
-│   ├── BuildSystemProvider.kt       # SPI interface
-│   ├── BuildSystemResolver.kt       # Detection + dispatch
-│   ├── ProjectModel.kt              # Unified model
-│   ├── gradle/
-│   │   └── GradleProvider.kt        # Gradle Tooling API impl
-│   └── manual/
-│       └── ManualProvider.kt        # Fallback: source-only
-```
-
-Future providers go in their own subpackages (`maven/`, `bazel/`, etc.) and register via `ServiceLoader`.
+**Session rebuild on build file changes:**
+- `KotlinLanguageServer` registers file watchers for `**/build.gradle.kts`, `**/build.gradle`, `**/settings.gradle.kts`, `**/settings.gradle`
+- `KotlinWorkspaceService.didChangeWatchedFiles` detects build file changes and invokes a callback
+- Callback re-resolves ProjectModel via `BuildSystemResolver`, calls `AnalysisSession.rebuild(newModel)`, and rewires all providers with the new facade
 
 ### 4. CompilerFacade Abstraction (`server/.../compiler/`)
 
 Feature providers never touch Kotlin compiler or Analysis API types directly. They program against our `CompilerFacade` interface using our own stable types.
 
-**Interface:**
+**Interface (actual implementation):**
 ```kotlin
 interface CompilerFacade {
-    /** Resolve the symbol at a given position */
-    fun resolveAtPosition(file: VirtualFile, position: Position): ResolvedSymbol?
-
-    /** Get the type of the expression at position */
-    fun getType(file: VirtualFile, position: Position): TypeInfo?
-
-    /** Get all diagnostics for a file */
-    fun getDiagnostics(file: VirtualFile): List<DiagnosticInfo>
-
-    /** Get completion candidates at position */
-    fun getCompletions(file: VirtualFile, position: Position): List<CompletionCandidate>
-
-    /** Find all references to a symbol across the project */
+    fun resolveAtPosition(file: Path, line: Int, column: Int): ResolvedSymbol?
+    fun getType(file: Path, line: Int, column: Int): TypeInfo?
+    fun getDiagnostics(file: Path): List<DiagnosticInfo>
+    fun getCompletions(file: Path, line: Int, column: Int): List<CompletionCandidate>
     fun findReferences(symbol: ResolvedSymbol): List<SourceLocation>
-
-    /** Find implementations of an interface/abstract class */
     fun findImplementations(symbol: ResolvedSymbol): List<SourceLocation>
-
-    /** Get KDoc/documentation for a symbol */
     fun getDocumentation(symbol: ResolvedSymbol): String?
-
-    /** Get all symbols declared in a file */
-    fun getFileSymbols(file: VirtualFile): List<ResolvedSymbol>
-
-    /** Prepare rename: validate the symbol can be renamed */
-    fun prepareRename(file: VirtualFile, position: Position): RenameContext?
-
-    /** Compute rename edits across all affected files */
+    fun getFileSymbols(file: Path): List<ResolvedSymbol>
+    fun prepareRename(file: Path, line: Int, column: Int): RenameContext?
     fun computeRename(context: RenameContext, newName: String): List<FileEdit>
+    fun updateFileContent(file: Path, content: String)
+    fun dispose()
 }
 ```
 
-**Our stable types (never change even if Kotlin APIs change):**
+Note: The interface uses `Path` + `line`/`column` (0-based) instead of `VirtualFile` + `Position` as originally designed. This avoids leaking LSP4J or IntelliJ types through the facade boundary.
+
+**Our stable types (defined in `Types.kt`):**
 ```kotlin
 data class ResolvedSymbol(
     val name: String,
-    val kind: SymbolKind,           // CLASS, FUNCTION, PROPERTY, CONSTRUCTOR, etc.
-    val location: SourceLocation,
-    val containingClass: String?,
-    val signature: String?,         // human-readable: "fun foo(x: Int): String"
-    val fqName: String?             // fully qualified name
+    val kind: SymbolKind,           // CLASS, INTERFACE, OBJECT, ENUM, ENUM_ENTRY,
+    val location: SourceLocation,   // FUNCTION, PROPERTY, CONSTRUCTOR, TYPE_ALIAS,
+    val containingClass: String?,   // TYPE_PARAMETER, PACKAGE, FILE, LOCAL_VARIABLE,
+    val signature: String?,         // PARAMETER
+    val fqName: String?
 )
 
-data class TypeInfo(
-    val fqName: String,
-    val shortName: String,
-    val nullable: Boolean,
-    val typeArguments: List<TypeInfo>
-)
-
-data class DiagnosticInfo(
-    val severity: Severity,         // ERROR, WARNING, INFO
-    val message: String,
-    val range: SourceRange,
-    val code: String?,              // e.g. "UNRESOLVED_REFERENCE"
-    val quickFixes: List<QuickFix>  // attached fix suggestions
-)
-
-data class CompletionCandidate(
-    val label: String,
-    val kind: SymbolKind,
-    val detail: String?,            // type info
-    val insertText: String,
-    val isDeprecated: Boolean
-)
+data class TypeInfo(val fqName: String, val shortName: String, val nullable: Boolean, val typeArguments: List<TypeInfo>)
+data class DiagnosticInfo(val severity: Severity, val message: String, val range: SourceRange, val code: String?, val quickFixes: List<QuickFix>)
+data class CompletionCandidate(val label: String, val kind: SymbolKind, val detail: String?, val insertText: String, val isDeprecated: Boolean)
+data class QuickFix(val title: String, val edits: List<FileEdit>)
+data class FileEdit(val path: Path, val range: SourceRange, val newText: String)
+data class RenameContext(val symbol: ResolvedSymbol, val range: SourceRange)
+data class SourceLocation(val path: Path, val line: Int, val column: Int)
+data class SourceRange(val path: Path, val startLine: Int, val startColumn: Int, val endLine: Int, val endColumn: Int)
 ```
 
 **AnalysisApiCompilerFacade — the K2/FIR implementation:**
 ```kotlin
+@OptIn(KaExperimentalApi::class)
 class AnalysisApiCompilerFacade(
     private val projectModel: ProjectModel
 ) : CompilerFacade {
 
-    // Standalone Analysis API session — no IntelliJ dependency
-    private val analysisSession: StandaloneAnalysisAPISession =
+    // All analysis calls serialized through single thread
+    private val analysisThread: ExecutorService = Executors.newSingleThreadExecutor(...)
+
+    // LRU cache for getFileSymbols results (128 entries, invalidated on updateFileContent)
+    private val symbolCache = LinkedHashMap<Path, List<ResolvedSymbol>>(...)
+
+    // Lazy-initialized standalone Analysis API session
+    private val session by lazy {
         buildStandaloneAnalysisAPISession {
             buildKtModuleProvider {
-                // Configure from ProjectModel
-                addModule(buildKtSourceModule {
-                    moduleName = projectModel.modules.first().name
-                    addSourceRoot(sourceRoots)
-                    addRegularDependency(libraryModule)  // classpath JARs
-                    platform = JvmPlatforms.defaultJvmPlatform
-                })
+                // 1. Library modules (deduplicated classpath JARs)
+                // 2. JDK module (from java.home)
+                // 3. Per-module source modules (multi-module support)
             }
-        }
-
-    override fun resolveAtPosition(file, position): ResolvedSymbol? {
-        // Use Analysis API's analyze {} block
-        analyze(ktElement) {
-            val symbol: KaSymbol = ktElement.resolveToSymbol() ?: return null
-            return symbol.toResolvedSymbol()  // map to our type
         }
     }
 
     override fun getDiagnostics(file): List<DiagnosticInfo> {
-        analyze(ktFile) {
-            return ktFile.collectDiagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
-                .map { it.toDiagnosticInfo() }  // map to our type
-        }
+        // analyze(ktFile) { ktFile.collectDiagnostics(ONLY_COMMON_CHECKERS) }
+        // Maps KaDiagnosticWithPsi -> DiagnosticInfo with try/catch for corrupt files
     }
 
-    // ... etc — each method enters analyze {} block, uses Ka* APIs,
-    //           maps results to our types before returning
+    override fun resolveAtPosition(file, line, column): ResolvedSymbol? {
+        // Find KtReferenceExpression at offset
+        // Get KtReference, call resolveToSymbols()
+        // Map KaSymbol -> ResolvedSymbol with try/catch
+    }
+
+    override fun getType(file, line, column): TypeInfo? {
+        // Find KtExpression at offset
+        // analyze(expr) { expr.expressionType }
+        // Map KaType -> TypeInfo
+    }
+
+    override fun getFileSymbols(file): List<ResolvedSymbol> {
+        // Check LRU cache first
+        // Walk KtFile.declarations recursively (classes, functions, properties)
+        // Map PSI declarations -> ResolvedSymbol
+        // Cache result
+    }
+
+    override fun findReferences(symbol): List<SourceLocation> {
+        // Text-based search for symbol name across all project KtFiles
+        // Resolve each occurrence, confirm it points to the same declaration
+    }
+
+    // getDocumentation: extract KDoc from declaration PSI
+    // findImplementations, getCompletions, prepareRename, computeRename: stub (future)
 }
 ```
 
-**Key design rules:**
+**Key design rules (unchanged from original):**
 - All `Ka*` types (`KaSymbol`, `KaType`, `KaDiagnostic`) stay **inside** the facade
 - All `analyze {}` blocks stay **inside** the facade
 - Feature providers only see `ResolvedSymbol`, `TypeInfo`, `DiagnosticInfo`, etc.
 - If an Analysis API standalone method doesn't work, the fix is localized to one facade method
+- All analysis calls serialized through single-threaded `ExecutorService` (answers the threading open question)
+
+**StubCompilerFacade:** Returns empty/null for all methods. Used by `AnalysisSession` as fallback if `AnalysisApiCompilerFacade` fails to initialize, and used extensively in tests.
 
 ### 5. Analysis Session Management (`server/.../analysis/`)
 
 **AnalysisSession:**
 - Receives `ProjectModel` from `BuildSystemResolver`
-- Creates `StandaloneAnalysisAPISession` configured with source roots + classpath from ProjectModel
-- Owns the `AnalysisApiCompilerFacade` instance
-- Handles session lifecycle: init, update (file changed), refresh (build file changed), dispose
-- On `ProjectModel` refresh (build file changed): rebuild the standalone session with new classpath
+- Creates `AnalysisApiCompilerFacade` (falls back to `StubCompilerFacade` on failure)
+- Owns the `CompilerFacade` instance (exposed as `@Volatile var`)
+- `rebuild(newModel)`: disposes old facade, creates new one with updated ProjectModel — used when build files change
+- `dispose()`: releases compiler resources
 
 **FileIndex:**
-- Maps: symbol name -> locations, file -> symbols, file -> imports
-- Built during initial workspace scan using `CompilerFacade.getFileSymbols()`
-- Updated incrementally on file changes
-- Supports: classes, functions, properties, type aliases
+- Maps: symbol name → set of files, file → list of symbols
+- Uses `ConcurrentHashMap` for thread safety
+- `updateFile(path, facade)`: refresh symbols for a single file
+- `removeFile(path)`: clear on file close
+- `findFilesBySymbolName(name)`: for narrowing reference search candidates
 
 **DiagnosticsPublisher:**
 - Calls `CompilerFacade.getDiagnostics()` on file open/change
-- Maps `DiagnosticInfo` to LSP `Diagnostic` (trivial, both are our types)
-- Publishes via LSP `textDocument/publishDiagnostics`
+- **Version-aware**: accepts `requestVersion` and `currentVersionSupplier` — discards results if document version has advanced since request was initiated (stale analysis cancellation)
+- **Error-resilient**: try/catch around facade call, logs warning via LSP `window/logMessage`
+- Maps `DiagnosticInfo` → LSP `Diagnostic`, publishes via `textDocument/publishDiagnostics`
 
 ### 6. Feature Providers
 
-Each provider gets `CompilerFacade` + `FileIndex` injected.
+Each provider receives `CompilerFacade` injected via `KotlinTextDocumentService.setAnalysis()`. All providers return `CompletableFuture` and run their work on `CompletableFuture.supplyAsync`.
 
-| Provider | LSP Method | CompilerFacade method used |
-|---|---|---|
-| DefinitionProvider | `textDocument/definition` | `resolveAtPosition()` → return `location` |
-| ReferencesProvider | `textDocument/references` | `resolveAtPosition()` → `findReferences()` |
-| HoverProvider | `textDocument/hover` | `resolveAtPosition()` + `getType()` + `getDocumentation()` |
-| DocumentSymbolProvider | `textDocument/documentSymbol` | `getFileSymbols()` |
-| ImplementationProvider | `textDocument/implementation` | `resolveAtPosition()` → `findImplementations()` |
-| TypeDefinitionProvider | `textDocument/typeDefinition` | `getType()` → resolve type's declaration location |
-| RenameProvider | `textDocument/rename` | `prepareRename()` → `computeRename()` |
-| CodeActionProvider | `textDocument/codeAction` | `getDiagnostics()` → extract `quickFixes` |
-| CompletionProvider | `textDocument/completion` | `getCompletions()` |
+| Provider | LSP Method | CompilerFacade method used | Status |
+|---|---|---|---|
+| DefinitionProvider | `textDocument/definition` | `resolveAtPosition()` → return `location` | Implemented |
+| ReferencesProvider | `textDocument/references` | `resolveAtPosition()` → `findReferences()` | Implemented |
+| HoverProvider | `textDocument/hover` | `resolveAtPosition()` + `getType()` + `getDocumentation()` → markdown | Implemented |
+| DocumentSymbolProvider | `textDocument/documentSymbol` | `getFileSymbols()` → DocumentSymbol hierarchy | Implemented |
+| ImplementationProvider | `textDocument/implementation` | `resolveAtPosition()` → `findImplementations()` | Wired (facade stub) |
+| TypeDefinitionProvider | `textDocument/typeDefinition` | `getType()` → resolve type's declaration location | Wired (facade stub) |
+| RenameProvider | `textDocument/rename` | `prepareRename()` → `computeRename()` | Wired (facade stub) |
+| CodeActionProvider | `textDocument/codeAction` | `getDiagnostics()` → extract `quickFixes` | Implemented (depends on facade quickFixes) |
+| CompletionProvider | `textDocument/completion` | `getCompletions()` | Wired (facade stub) |
+
+"Wired (facade stub)" means the LSP provider dispatches correctly to the CompilerFacade, but the facade method returns empty/null. These can be implemented incrementally behind the stable interface.
 
 ## Marketplace Constraints Addressed
 
-| Constraint | Solution |
-|---|---|
-| VSIX size | No bundled JVM. Server JAR ~30-50 MB. Total VSIX < 60 MB |
-| Activation | `onLanguage:kotlin` only, no startup penalty |
-| JVM dependency | Require system Java 11+, detect via JAVA_HOME/PATH |
-| Licensing | Kotlin compiler = Apache 2.0, LSP4J = EPL 2.0. Both permissive |
-| Process spawning | stdio via vscode-languageclient (standard pattern) |
-| Platform support | Pure JVM server = runs anywhere Java runs. No native binaries |
+| Constraint | Solution | Actual |
+|---|---|---|
+| VSIX size | No bundled JVM. Server JAR ~30-50 MB. Total VSIX < 60 MB | **44.88 MB VSIX** (49 MB shadow JAR) |
+| Activation | `onLanguage:kotlin` only, no startup penalty | Implemented |
+| JVM dependency | Require system Java 17+, detect via JAVA_HOME/PATH | Implemented (javaDetector.ts) |
+| Licensing | Kotlin compiler = Apache 2.0, LSP4J = EPL 2.0. Both permissive | Verified |
+| Process spawning | stdio via vscode-languageclient (standard pattern) | Implemented |
+| Platform support | Pure JVM server = runs anywhere Java runs. No native binaries | Verified |
 
 ## Performance Design
 
 ### Startup Strategy
-- **Lazy compiler init**: Don't create `StandaloneAnalysisAPISession` until first file is opened
-- **Async indexing**: Return `initialized` immediately, index workspace in background on `Index thread`
-- **Progress reporting**: Use LSP `window/workDoneProgress` during workspace indexing
-- **JVM flags for fast startup**:
+- **Lazy compiler init**: `StandaloneAnalysisAPISession` created lazily (`by lazy`) on first facade method call
+- **Async initialization**: `initialized` handler runs build system resolution and session creation on `Dispatchers.Default` coroutine scope, returns immediately
+- **JVM flags for fast startup** (set by client):
   ```
   -Xmx512m -XX:+UseG1GC -XX:+TieredCompilation -XX:TieredStopAtLevel=1
   ```
-  `TieredStopAtLevel=1` skips C2 optimization — faster to interactive by ~1-2s at the cost of slightly lower peak throughput (acceptable for a review tool)
 
-### Incremental Analysis
-Stop the compiler at the **ANALYSIS phase** (skip codegen) — ~30-40% faster than full compilation.
+### Debouncing & Cancellation (Implemented)
+- **Debounce `didChange`**: 250ms configurable delay before triggering diagnostics. Uses `ScheduledExecutorService` with per-URI pending future tracking. New changes cancel pending diagnostics for that URI.
+- **Document versioning**: `ConcurrentHashMap<String, Int>` tracks current version per URI. Versions set on `didOpen`/`didChange`, cleared on `didClose`.
+- **Stale analysis cancellation**: `DiagnosticsPublisher.publishDiagnostics()` accepts the request version and a supplier for the current version. If document version has advanced, results are silently discarded.
 
-**Tiered invalidation on file change:**
-1. Re-parse only the changed file (PSI tree)
-2. Re-resolve only that file's `BindingContext`
-3. If **signatures changed** → re-resolve dependents (tracked via file dependency graph in `FileIndex`)
-4. If **only body changed** → no propagation needed
-
-Most review edits are body-only, so the common case re-analyzes a single file.
-
-### Debouncing & Cancellation
-- **Debounce `didChange`**: Wait 200-300ms of inactivity before triggering analysis
-- **Cancel stale analysis**: Use LSP `$/cancelRequest` (native in LSP4J) to abort in-flight analysis when a newer change arrives
-- **Document versioning**: Tag each analysis with document version, discard results for stale versions
-
-### Concurrency Model (Single-Writer / Multiple-Reader)
+### Concurrency Model
 
 ```
-┌─────────────────────────────────────┐
-│  Request thread (LSP4J dispatcher)  │  ← fast: hover, symbols, definition
-│  Reads from last-good snapshot      │    (no locks on read path)
-├─────────────────────────────────────┤
-│  Analysis thread (single, serial)   │  ← heavy: re-analyze, diagnostics
-│  Calls CompilerFacade methods       │    (swaps in snapshot when done)
-├─────────────────────────────────────┤
-│  Index thread (background)          │  ← startup: workspace scan
-│  Populates FileIndex                │    (runs once, then merges updates)
-└─────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│  LSP4J Request thread                   │  ← feature provider calls (async)
+│  Feature providers run on               │    hover, definition, symbols, etc.
+│  CompletableFuture.supplyAsync          │
+├─────────────────────────────────────────┤
+│  Analysis thread (single, serial)       │  ← CompilerFacade methods
+│  Executors.newSingleThreadExecutor      │    all analyze {} blocks serialized
+│  Named "kotlin-analysis"                │
+├─────────────────────────────────────────┤
+│  Debounce scheduler thread              │  ← didChange → delayed diagnostics
+│  ScheduledExecutorService               │    250ms debounce, cancellable
+│  Named "diagnostics-debounce"           │
+├─────────────────────────────────────────┤
+│  Coroutine scope (Dispatchers.Default)  │  ← initialization, session rebuild
+│  Build system resolution, session setup │
+└─────────────────────────────────────────┘
 ```
 
-- Read-heavy requests (hover, definition, references) served from cached `CompilerFacade` results — never blocked by ongoing analysis
-- Analysis thread re-runs `CompilerFacade.getDiagnostics()` and updates caches atomically
-- No locks on the hot read path
-
-### Caching
+### Caching (Implemented)
 | Cache | Strategy |
 |---|---|
 | PSI trees per file | Managed by Analysis API session internally |
-| Diagnostics per file | Cache `List<DiagnosticInfo>` per file; replace atomically on re-analysis |
-| Resolved symbols by position | LRU cache per file, invalidate on file change |
-| File dependency graph | Maintained incrementally in `FileIndex` |
+| File symbols | LRU cache (128 entries) in `AnalysisApiCompilerFacade`, invalidated on `updateFileContent` |
 
-### Review-Specific Optimizations
-Since this is a review-focused tool, not a full IDE:
-
-| Optimization | Rationale |
-|---|---|
-| Skip codegen phases | Never compile to bytecode — stop after ANALYSIS |
-| Index `src/main` first | Prioritize main sources, index `src/test` in background after |
-| Lazy classpath resolution | Only resolve external deps when a file actually imports them |
-| Limit completion depth | Only project + direct deps, skip full Java stdlib enumeration |
+### Multi-Module Support (Implemented)
+- `GradleProvider` returns all modules from `IdeaProject`
+- `AnalysisApiCompilerFacade` creates per-module `KtSourceModule` entries in the standalone session
+- Classpath JARs deduplicated across modules (shared library modules)
+- JDK module shared across all source modules
+- Cross-module go-to-definition works through the shared analysis session
 
 ### Target Latencies
 
 | Scenario | Target |
 |---|---|
 | Cold start → first diagnostics | < 5s (small project), < 15s (large) |
-| Keystroke → updated diagnostics | < 500ms |
+| Keystroke → updated diagnostics | < 500ms (after 250ms debounce) |
 | Hover / Go to Definition | < 100ms |
 | Find References | < 300ms |
 | Completion popup | < 200ms |
 
+## Error Handling (Implemented)
+
+| Scenario | Behavior |
+|---|---|
+| Java not found | Extension shows clear error message, does not start server |
+| Java < 17 | Extension shows version requirement error |
+| Gradle connection fails | `BuildSystemResolver` falls back to `ManualProvider`, logs warning |
+| Individual Gradle module fails | `GradleProvider` skips that module, logs warning, continues with others |
+| Analysis API initialization fails | `AnalysisSession` falls back to `StubCompilerFacade`, logs error |
+| Corrupt .kt file during analysis | `AnalysisApiCompilerFacade` catches exception, returns empty/null, logs warning |
+| Diagnostics analysis fails | `DiagnosticsPublisher` catches exception, logs warning via LSP, publishes empty list |
+
 ## Build & Package Pipeline
 
-1. `./gradlew :server:shadowJar` → fat JAR with all deps
-2. `cd client && npm run build` → esbuild bundle
-3. `cp server/build/libs/server-all.jar client/server/` → embed JAR
-4. `vsce package` → produce `.vsix`
+1. `cd server && ./gradlew shadowJar` → fat JAR (`server-all.jar`, ~49 MB)
+2. `cd client && npm install && npm run build` → esbuild bundle (`dist/extension.js`)
+3. `cp server/build/libs/server-all.jar client/server/` → embed JAR in extension
+4. `cd client && npx @vscode/vsce package` → produce `.vsix` (~44.88 MB)
+
+Automated via `scripts/build.sh` (steps 1-3) and `scripts/package.sh` (all steps).
+
+## CI/CD
+
+**CI** (`.github/workflows/ci.yml`): Runs on push/PR. Matrix: Java 17/21 × macOS/Linux. Builds server, runs 48 tests, builds client, packages VSIX. Uploads VSIX as artifact.
+
+**Release** (`.github/workflows/release.yml`): Triggered on tag push (`v*`). Builds, tests, verifies VSIX < 60 MB, publishes to VS Code Marketplace via `VSCE_PAT` secret, creates GitHub Release with VSIX attached.
 
 ## Resolved Questions
-- ~~Gradle/Maven project detection~~: **Resolved (ADR-12)** — Pluggable BuildSystemProvider SPI. Gradle Tooling API in v1, others via future providers.
-- ~~Multi-module projects~~: **Resolved** — ProjectModel supports multiple ModuleInfo entries. BuildSystemProvider.resolve() returns all modules. AnalysisSession configures per-module source roots and classpath.
-- ~~Kotlin compiler version~~: **Resolved (ADR-15)** — Target Kotlin 2.0+. Pin Analysis API artifacts to a specific Kotlin version (e.g. 2.1.x). Upgrade deliberately after testing. The CompilerFacade abstraction (ADR-14) isolates version-specific breakage.
+- ~~Gradle/Maven project detection~~: **Resolved (ADR-12)** — Pluggable BuildSystemProvider SPI. Gradle Tooling API in v1, others via future providers. Gradle failure falls back to Manual.
+- ~~Multi-module projects~~: **Resolved & Implemented** — ProjectModel supports multiple ModuleInfo entries. GradleProvider returns all modules. AnalysisApiCompilerFacade creates per-module source modules with shared library/JDK modules. Cross-module navigation works.
+- ~~Kotlin compiler version~~: **Resolved (ADR-15)** — Using Kotlin Analysis API 2.1.0. All `-for-ide` artifacts pinned with `isTransitive = false`. CompilerFacade abstraction (ADR-14) isolates version-specific breakage.
+- ~~Analysis API threading~~: **Resolved** — All `analyze {}` calls serialized through a single-threaded `ExecutorService`. The standalone session does not support concurrent `analyze {}` calls.
+- ~~Analysis API incremental updates~~: **Resolved** — The standalone session does not support incremental file updates. On build file changes, the entire session is rebuilt via `AnalysisSession.rebuild()`.
 
-## Open Questions
-- Analysis API standalone session threading: does `analyze {}` block support concurrent calls from multiple threads, or must we serialize all calls through a single thread?
-- Analysis API incremental file updates: does the standalone session support notifying about file content changes without rebuilding the entire session?
+## Compatibility
+
+- **Kotlin**: 2.0+ (Analysis API 2.1.0 / K2/FIR)
+- **Gradle**: 6.0+ (Tooling API 8.12 connects to any project Gradle version)
+- **JVM**: Java 17+ required
+- **Android**: Partially supported (Kotlin analysis works; Android-specific generated code may show unresolved references)
+- **KMP**: Not currently supported (JVM-only source modules configured)
