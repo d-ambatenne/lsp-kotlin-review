@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+build/
+server/build/
+
+# Node
+node_modules/
+client/node_modules/
+client/dist/
+client/server/*.jar
+
+# VS Code extension
+*.vsix
+out/
+
+# IDE
+.idea/
+*.iml
+.vscode/.settings/
+
+# OS
+.DS_Store
+Thumbs.db

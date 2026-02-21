@@ -1,0 +1,84 @@
+{
+  "name": "kotlin-review",
+  "displayName": "Kotlin Review",
+  "description": "Kotlin language support for code review and small changes",
+  "version": "0.1.0",
+  "publisher": "kotlin-review",
+  "license": "Apache-2.0",
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#7F52FF",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kotlin-review/lsp-kotlin-review"
+  },
+  "bugs": {
+    "url": "https://github.com/kotlin-review/lsp-kotlin-review/issues"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "kotlin",
+    "language server",
+    "code review",
+    "lsp"
+  ],
+  "activationEvents": [
+    "onLanguage:kotlin"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "kotlin",
+        "extensions": [
+          ".kt",
+          ".kts"
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "Kotlin Review",
+      "properties": {
+        "kotlinReview.java.home": {
+          "type": "string",
+          "default": "",
+          "description": "Path to Java runtime (11+). If empty, uses JAVA_HOME or PATH."
+        },
+        "kotlinReview.server.jvmArgs": {
+          "type": "string",
+          "default": "",
+          "description": "Additional JVM arguments for the language server."
+        },
+        "kotlinReview.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace communication between VS Code and the language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.75.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  }
+}

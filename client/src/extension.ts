@@ -1,0 +1,78 @@
+import * as vscode from "vscode";
+import * as path from "path";
+import {
+  LanguageClient,
+  LanguageClientOptions,
+  ServerOptions,
+} from "vscode-languageclient/node";
+import { findJava } from "./javaDetector";
+import { getServerJvmArgs, getTraceServer } from "./config";
+
+let client: LanguageClient | undefined;
+
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  const outputChannel = vscode.window.createOutputChannel("Kotlin Review");
+
+  let javaInfo;
+  try {
+    javaInfo = findJava();
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    vscode.window.showErrorMessage(msg);
+    outputChannel.appendLine(`[ERROR] ${msg}`);
+    return;
+  }
+
+  outputChannel.appendLine(`Using Java ${javaInfo.version} at ${javaInfo.javaPath}`);
+
+  const jarPath = path.join(context.extensionPath, "server", "server-all.jar");
+
+  const defaultJvmArgs = [
+    "-Xmx512m",
+    "-XX:+UseG1GC",
+    "-XX:+TieredCompilation",
+    "-XX:TieredStopAtLevel=1",
+  ];
+  const userJvmArgs = getServerJvmArgs();
+
+  const serverOptions: ServerOptions = {
+    command: javaInfo.javaPath,
+    args: [...defaultJvmArgs, ...userJvmArgs, "-jar", jarPath],
+  };
+
+  const traceServer = getTraceServer();
+
+  const clientOptions: LanguageClientOptions = {
+    documentSelector: [
+      { scheme: "file", language: "kotlin" },
+    ],
+    outputChannel,
+    traceOutputChannel: outputChannel,
+    initializationOptions: {},
+  };
+
+  client = new LanguageClient(
+    "kotlinReview",
+    "Kotlin Review",
+    serverOptions,
+    clientOptions
+  );
+
+  if (traceServer !== "off") {
+    client.setTrace(
+      traceServer === "verbose"
+        ? vscode.lsp.Trace.Verbose
+        : vscode.lsp.Trace.Messages
+    );
+  }
+
+  await client.start();
+  outputChannel.appendLine("Kotlin Review LSP client started");
+}
+
+export async function deactivate(): Promise<void> {
+  if (client) {
+    await client.stop();
+    client = undefined;
+  }
+}

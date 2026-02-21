@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        java: ['17', '21']
+    runs-on: ${{ matrix.os }}
+    name: Build (Java ${{ matrix.java }}, ${{ matrix.os }})
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java ${{ matrix.java }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('server/**/*.gradle.kts') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
+      - name: Cache npm packages
+        uses: actions/cache@v4
+        with:
+          path: client/node_modules
+          key: ${{ runner.os }}-npm-${{ hashFiles('client/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-npm-
+
+      - name: Build server shadow JAR
+        working-directory: server
+        run: ./gradlew shadowJar
+
+      - name: Run server tests
+        working-directory: server
+        run: ./gradlew test
+
+      - name: Install client dependencies
+        working-directory: client
+        run: npm install
+
+      - name: Build client
+        working-directory: client
+        run: npm run build
+
+      - name: Copy server JAR
+        run: |
+          mkdir -p client/server
+          cp server/build/libs/server-all.jar client/server/
+
+      - name: Package VSIX
+        if: matrix.java == '17' && matrix.os == 'ubuntu-latest'
+        working-directory: client
+        run: npx @vscode/vsce package --no-dependencies
+
+      - name: Upload VSIX
+        if: matrix.java == '17' && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-review-vsix
+          path: client/*.vsix
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-java${{ matrix.java }}-${{ matrix.os }}
+          path: server/build/reports/tests/

@@ -1,0 +1,17 @@
+.git/**
+.gradle/**
+server/src/**
+server/build/**
+server/*.gradle.kts
+scripts/**
+docs/**
+node_modules/**
+client/src/**
+client/node_modules/**
+client/tsconfig.json
+client/esbuild.mjs
+*.vsix
+.gitignore
+.DS_Store
+.github/**
+client/icon.svg

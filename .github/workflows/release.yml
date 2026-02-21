@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build server
+        working-directory: server
+        run: ./gradlew shadowJar
+
+      - name: Install client dependencies
+        working-directory: client
+        run: npm ci
+
+      - name: Build client
+        working-directory: client
+        run: npm run build
+
+      - name: Copy server JAR
+        run: |
+          mkdir -p client/server
+          cp server/build/libs/server-all.jar client/server/
+
+      - name: Package VSIX
+        working-directory: client
+        run: npx @vscode/vsce package --no-dependencies
+
+      - name: Verify VSIX size
+        working-directory: client
+        run: |
+          VSIX_FILE=$(ls *.vsix)
+          SIZE=$(stat --format=%s "$VSIX_FILE")
+          MAX_SIZE=$((60 * 1024 * 1024))
+          echo "VSIX: $VSIX_FILE ($SIZE bytes)"
+          if [ "$SIZE" -gt "$MAX_SIZE" ]; then
+            echo "ERROR: VSIX exceeds 60MB limit"
+            exit 1
+          fi
+
+      - name: Publish to VS Code Marketplace
+        working-directory: client
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx @vscode/vsce publish --no-dependencies
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VSIX_FILE=$(ls client/*.vsix)
+          gh release create "${{ github.ref_name }}" "$VSIX_FILE" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes

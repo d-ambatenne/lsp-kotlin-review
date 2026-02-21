@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "./scripts/build.sh",
+    "package": "./scripts/package.sh",
+    "clean": "rm -rf server/build client/dist client/server/*.jar client/node_modules"
+  }
+}
