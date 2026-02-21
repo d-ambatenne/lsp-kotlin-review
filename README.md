@@ -28,6 +28,24 @@ Then install the generated `.vsix` from `client/`.
 - **VS Code 1.75+**
 - A Kotlin project (Gradle recommended for full classpath resolution)
 
+## Compatibility
+
+### Kotlin versions
+
+The server uses the Kotlin Analysis API 2.1.0 (K2/FIR). It supports analyzing projects that target **Kotlin 2.0+**. Kotlin 1.x projects may work for basic features (diagnostics, navigation) but are not officially supported.
+
+### Gradle versions
+
+The Gradle Tooling API 8.12 is used for classpath resolution. Compatible with **Gradle 6.0+** projects (wrapper version doesn't need to match — the Tooling API connects to whatever Gradle version the project uses).
+
+### Android projects
+
+**Partially supported.** Android/Gradle projects are detected and their source roots and classpath are resolved. Standard Kotlin code analysis works (diagnostics, navigation, hover, completion). However, Android-specific APIs (e.g. `R` class references, generated code from ViewBinding/DataBinding, Compose compiler plugin outputs) may show unresolved reference errors since the extension does not run the Android Gradle Plugin's code generation tasks.
+
+### Kotlin Multiplatform (KMP)
+
+**Not currently supported.** KMP projects use expect/actual declarations and platform-specific source sets that require special handling in the Analysis API session configuration. The server currently configures JVM-only source modules. KMP support may be added in a future version.
+
 ## Features
 
 ### Core
