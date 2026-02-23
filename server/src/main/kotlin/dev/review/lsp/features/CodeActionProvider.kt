@@ -7,7 +7,10 @@ import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.jsonrpc.messages.Either
 import java.util.concurrent.CompletableFuture
 
-class CodeActionProvider(private val facade: CompilerFacade) {
+class CodeActionProvider(
+    private val facade: CompilerFacade,
+    private val projectDir: java.nio.file.Path? = null
+) {
 
     fun codeAction(params: CodeActionParams): CompletableFuture<List<Either<Command, CodeAction>>> {
         return CompletableFuture.supplyAsync {
@@ -15,6 +18,7 @@ class CodeActionProvider(private val facade: CompilerFacade) {
             val diagnostics = facade.getDiagnostics(path)
 
             val result = mutableListOf<Either<Command, CodeAction>>()
+            var addedGenerateSourcesAction = false
 
             for (diag in diagnostics) {
                 val diagRange = PositionConverter.toLspRange(diag.range)
@@ -40,6 +44,29 @@ class CodeActionProvider(private val facade: CompilerFacade) {
                         ))
                     }
                     result.add(Either.forRight(action))
+                }
+
+                // For unresolved references with the generated-class hint, add a "generate sources" action
+                if (!addedGenerateSourcesAction &&
+                    diag.code == "UNRESOLVED_REFERENCE" &&
+                    diag.message.contains("generated class")) {
+                    val action = CodeAction("Run Gradle code generation").apply {
+                        kind = CodeActionKind.QuickFix
+                        command = Command(
+                            "Run Gradle code generation",
+                            "kotlinReview.generateSources",
+                            listOf(projectDir?.toString() ?: "")
+                        )
+                        this.diagnostics = listOf(Diagnostic(
+                            diagRange,
+                            diag.message,
+                            null,
+                            "kotlin-review",
+                            diag.code
+                        ))
+                    }
+                    result.add(Either.forRight(action))
+                    addedGenerateSourcesAction = true
                 }
             }
 

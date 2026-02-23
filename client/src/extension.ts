@@ -64,6 +64,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
   }
 
+  // Register command for generating Android sources from code action
+  context.subscriptions.push(
+    vscode.commands.registerCommand("kotlinReview.generateSources", (projectDir?: string) => {
+      const terminal = vscode.window.createTerminal("Kotlin Review: Generate Sources");
+      if (projectDir) {
+        terminal.sendText(`cd "${projectDir}" && ./gradlew generateDebugResources generateDebugBuildConfig --continue; echo 'Done. Reload window to pick up generated sources.'`);
+      } else {
+        terminal.sendText("./gradlew generateDebugResources generateDebugBuildConfig --continue; echo 'Done. Reload window to pick up generated sources.'");
+      }
+      terminal.show();
+    })
+  );
+
   await client.start();
   outputChannel.appendLine("Kotlin Review LSP client started");
 }

@@ -26,6 +26,22 @@ class AnalysisApiCompilerFacade(
     private val projectModel: ProjectModel
 ) : CompilerFacade {
 
+    // Detect if this is an Android project missing generated sources (for diagnostic hints)
+    private val androidMissingGenerated: Boolean = run {
+        val hasAndroid = projectModel.modules.any { it.isAndroid }
+        if (!hasAndroid) return@run false
+        // Check if any Android module lacks build/generated/
+        projectModel.modules.filter { it.isAndroid }.any { module ->
+            val moduleDir = module.sourceRoots.firstOrNull()?.let { root ->
+                // Walk up from src/main/java or src/main/kotlin to module root
+                var dir = root
+                repeat(3) { dir = dir.parent ?: return@any true }
+                dir
+            }
+            moduleDir == null || !java.nio.file.Files.isDirectory(moduleDir.resolve("build/generated"))
+        }
+    }
+
     private val analysisThread: ExecutorService = Executors.newSingleThreadExecutor { r ->
         Thread(r, "kotlin-analysis").apply { isDaemon = true }
     }
@@ -80,21 +96,22 @@ class AnalysisApiCompilerFacade(
                     )
                 })
 
-                // Configure per-module source roots for multi-module support.
-                // Cross-module go-to-definition works through the shared session.
-                for (moduleInfo in projectModel.modules) {
-                    addModule(buildKtSourceModule {
-                        moduleName = moduleInfo.name
-                        this.platform = JvmPlatforms.defaultJvmPlatform
-                        for (root in moduleInfo.sourceRoots) {
-                            addSourceRoot(root)
-                        }
-                        addRegularDependency(jdkModule)
-                        for (lib in libraryModules) {
-                            addRegularDependency(lib)
-                        }
-                    })
-                }
+                // Merge all source roots into a single module for cross-module resolution.
+                // The standalone Analysis API doesn't support inter-module dependencies
+                // without complex dependency graph wiring. A single merged module gives
+                // full cross-module navigation/completion for code review purposes.
+                val allSourceRoots = projectModel.modules.flatMap { it.sourceRoots }.distinct()
+                addModule(buildKtSourceModule {
+                    moduleName = projectModel.modules.firstOrNull()?.name ?: "sources"
+                    this.platform = JvmPlatforms.defaultJvmPlatform
+                    for (root in allSourceRoots) {
+                        addSourceRoot(root)
+                    }
+                    addRegularDependency(jdkModule)
+                    for (lib in libraryModules) {
+                        addRegularDependency(lib)
+                    }
+                })
             }
         }
     }
@@ -814,12 +831,18 @@ class AnalysisApiCompilerFacade(
         val endCol = textRange.endOffset - document.getLineStartOffset(endLine)
 
         val range = SourceRange(file, startLine, startCol, endLine, endCol)
-        System.err.println("[DIAG] factoryName='${diagnostic.factoryName}' severity=${diagnostic.severity} psi=${psi.javaClass.simpleName} msg='${diagnostic.defaultMessage.take(60)}'")
         val quickFixes = generateQuickFixes(diagnostic, psi, file, document)
+
+        // Enhance unresolved reference messages in Android projects missing generated sources
+        val message = if (androidMissingGenerated && diagnostic.factoryName == "UNRESOLVED_REFERENCE") {
+            "${diagnostic.defaultMessage} (may be a generated class — run: ./gradlew generateDebugResources generateDebugBuildConfig --continue)"
+        } else {
+            diagnostic.defaultMessage
+        }
 
         return DiagnosticInfo(
             severity = mapSeverity(diagnostic.severity),
-            message = diagnostic.defaultMessage,
+            message = message,
             range = range,
             code = diagnostic.factoryName,
             quickFixes = quickFixes

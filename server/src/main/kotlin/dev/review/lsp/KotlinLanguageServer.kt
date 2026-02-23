@@ -59,12 +59,15 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
 
                 val c = client ?: return@launch
                 val publisher = DiagnosticsPublisher(session.facade, c)
-                textDocumentService.setAnalysis(session.facade, publisher)
+                textDocumentService.setAnalysis(session.facade, publisher, model.projectDir)
 
                 // Wire up workspace service for build file changes
                 workspaceService.onBuildFileChanged = { rebuildSession() }
 
                 log(MessageType.Info, "Analysis session ready (${model.modules.size} module(s))")
+
+                // Show hint for Android projects missing generated sources
+                checkAndroidBuildHint(model, c)
 
                 // Register file watchers for build files
                 registerFileWatchers()
@@ -90,6 +93,28 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
         c.registerCapability(RegistrationParams(listOf(registration)))
     }
 
+    private fun checkAndroidBuildHint(model: dev.review.lsp.buildsystem.ProjectModel, c: LanguageClient) {
+        val androidModules = model.modules.filter { it.isAndroid }
+        if (androidModules.isEmpty()) return
+
+        val rp = rootPath ?: return
+        val anyMissingGenerated = androidModules.any { module ->
+            // Check if this module's build/generated/ directory exists and has content
+            val moduleDir = module.sourceRoots.firstOrNull()?.parent?.parent?.parent // src/main/kotlin -> module root
+                ?: rp
+            val generatedDir = moduleDir.resolve("build/generated")
+            !java.nio.file.Files.isDirectory(generatedDir) ||
+                (java.nio.file.Files.list(generatedDir).use { it.count() } == 0L)
+        }
+
+        if (anyMissingGenerated) {
+            c.showMessage(MessageParams(
+                MessageType.Info,
+                "Android project detected. Run ./gradlew generateDebugResources generateDebugBuildConfig --continue for R class and BuildConfig support."
+            ))
+        }
+    }
+
     private fun rebuildSession() {
         val rp = rootPath ?: return
         scope.launch {
@@ -105,7 +130,7 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
                     val newFacade = session.rebuild(model)
                     val c = client ?: return@launch
                     val publisher = DiagnosticsPublisher(newFacade, c)
-                    textDocumentService.setAnalysis(newFacade, publisher)
+                    textDocumentService.setAnalysis(newFacade, publisher, model.projectDir)
                     log(MessageType.Info, "Analysis session rebuilt (${model.modules.size} module(s))")
                 }
             } catch (e: Exception) {

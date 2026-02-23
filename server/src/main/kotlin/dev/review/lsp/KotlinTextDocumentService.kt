@@ -49,7 +49,7 @@ class KotlinTextDocumentService : TextDocumentService {
         this.client = client
     }
 
-    fun setAnalysis(facade: CompilerFacade, publisher: DiagnosticsPublisher) {
+    fun setAnalysis(facade: CompilerFacade, publisher: DiagnosticsPublisher, projectDir: java.nio.file.Path? = null) {
         this.facade = facade
         this.diagnosticsPublisher = publisher
         // P0
@@ -61,7 +61,7 @@ class KotlinTextDocumentService : TextDocumentService {
         this.implementationProvider = ImplementationProvider(facade)
         this.typeDefinitionProvider = TypeDefinitionProvider(facade)
         this.renameProvider = RenameProvider(facade)
-        this.codeActionProvider = CodeActionProvider(facade)
+        this.codeActionProvider = CodeActionProvider(facade, projectDir)
         this.completionProvider = CompletionProvider(facade)
     }
 

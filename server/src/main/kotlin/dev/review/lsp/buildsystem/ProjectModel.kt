@@ -3,7 +3,8 @@ package dev.review.lsp.buildsystem
 import java.nio.file.Path
 
 data class ProjectModel(
-    val modules: List<ModuleInfo>
+    val modules: List<ModuleInfo>,
+    val projectDir: Path? = null
 )
 
 data class ModuleInfo(
@@ -13,5 +14,6 @@ data class ModuleInfo(
     val classpath: List<Path>,
     val testClasspath: List<Path>,
     val kotlinVersion: String?,
-    val jvmTarget: String?
+    val jvmTarget: String?,
+    val isAndroid: Boolean = false
 )

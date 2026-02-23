@@ -55,13 +55,13 @@ class BuildSystemResolver(
         val (provider, projectDir) = detect(workspaceRoot)
         return try {
             val model = provider.resolve(projectDir)
-            provider to model
+            provider to model.copy(projectDir = projectDir)
         } catch (e: Exception) {
             if (provider === manualProvider) throw e
             // Gradle (or other provider) failed -- fall back to ManualProvider
             System.err.println("Build system '${provider.id}' failed: ${e.message}, falling back to manual")
             val model = manualProvider.resolve(projectDir)
-            manualProvider to model
+            manualProvider to model.copy(projectDir = projectDir)
         }
     }
 }
