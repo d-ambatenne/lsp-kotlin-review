@@ -18,8 +18,8 @@ import java.util.concurrent.TimeUnit
 class KotlinTextDocumentService : TextDocumentService {
 
     private var client: LanguageClient? = null
-    private var facade: CompilerFacade? = null
-    private var diagnosticsPublisher: DiagnosticsPublisher? = null
+    @Volatile private var facade: CompilerFacade? = null
+    @Volatile private var diagnosticsPublisher: DiagnosticsPublisher? = null
 
     // Document version tracking for stale analysis cancellation
     private val documentVersions = ConcurrentHashMap<String, Int>()
@@ -33,17 +33,17 @@ class KotlinTextDocumentService : TextDocumentService {
     var debounceMs: Long = 250L
 
     // P0 providers
-    private var definitionProvider: DefinitionProvider? = null
-    private var referencesProvider: ReferencesProvider? = null
-    private var hoverProvider: HoverProvider? = null
-    private var documentSymbolProvider: DocumentSymbolProvider? = null
+    @Volatile private var definitionProvider: DefinitionProvider? = null
+    @Volatile private var referencesProvider: ReferencesProvider? = null
+    @Volatile private var hoverProvider: HoverProvider? = null
+    @Volatile private var documentSymbolProvider: DocumentSymbolProvider? = null
 
     // P1 providers
-    private var implementationProvider: ImplementationProvider? = null
-    private var typeDefinitionProvider: TypeDefinitionProvider? = null
-    private var renameProvider: RenameProvider? = null
-    private var codeActionProvider: CodeActionProvider? = null
-    private var completionProvider: CompletionProvider? = null
+    @Volatile private var implementationProvider: ImplementationProvider? = null
+    @Volatile private var typeDefinitionProvider: TypeDefinitionProvider? = null
+    @Volatile private var renameProvider: RenameProvider? = null
+    @Volatile private var codeActionProvider: CodeActionProvider? = null
+    @Volatile private var completionProvider: CompletionProvider? = null
 
     fun connect(client: LanguageClient) {
         this.client = client
@@ -77,7 +77,11 @@ class KotlinTextDocumentService : TextDocumentService {
         documentVersions[uri] = version
         client?.logMessage(MessageParams(MessageType.Info, "Opened: $uri"))
 
-        val f = facade ?: return
+        val f = facade
+        if (f == null) {
+            client?.logMessage(MessageParams(MessageType.Warning, "Facade not ready for: $uri"))
+            return
+        }
         val path = UriUtil.toPath(uri)
         f.updateFileContent(path, params.textDocument.text)
         diagnosticsPublisher?.publishDiagnostics(path, uri, version) { documentVersions[uri] }
@@ -111,7 +115,18 @@ class KotlinTextDocumentService : TextDocumentService {
         diagnosticsPublisher?.clearDiagnostics(uri)
     }
 
-    override fun didSave(params: DidSaveTextDocumentParams) {}
+    override fun didSave(params: DidSaveTextDocumentParams) {
+        val f = facade ?: return
+        val uri = params.textDocument.uri
+        val path = UriUtil.toPath(uri)
+
+        // Rebuild analysis session from disk to pick up saved changes
+        f.refreshAnalysis()
+
+        // Re-publish diagnostics with the rebuilt session
+        val version = documentVersions[uri] ?: 0
+        diagnosticsPublisher?.publishDiagnostics(path, uri, version) { documentVersions[uri] }
+    }
 
     // P0 features
 

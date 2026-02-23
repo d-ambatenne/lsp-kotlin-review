@@ -16,8 +16,9 @@ class BuildSystemResolverTest {
     @Test
     fun `falls back to manual when no markers found`() {
         val resolver = BuildSystemResolver()
-        val provider = resolver.detect(tempDir)
+        val (provider, dir) = resolver.detect(tempDir)
         assertEquals("manual", provider.id)
+        assertEquals(tempDir, dir)
     }
 
     @Test
@@ -34,8 +35,29 @@ class BuildSystemResolverTest {
         Files.createFile(tempDir.resolve("build.fake"))
 
         val resolver = BuildSystemResolver(listOf(fakeProvider))
-        val provider = resolver.detect(tempDir)
+        val (provider, dir) = resolver.detect(tempDir)
         assertEquals("fake", provider.id)
+        assertEquals(tempDir, dir)
+    }
+
+    @Test
+    fun `detects provider in child directory`() {
+        val fakeProvider = object : BuildSystemProvider {
+            override val id = "fake"
+            override val markerFiles = listOf("build.fake")
+            override val priority = 10
+            override suspend fun resolve(workspaceRoot: Path) = ProjectModel(emptyList())
+            override suspend fun resolveModule(workspaceRoot: Path, moduleName: String) =
+                ModuleInfo(moduleName, emptyList(), emptyList(), emptyList(), emptyList(), null, null)
+        }
+
+        val childDir = Files.createDirectory(tempDir.resolve("server"))
+        Files.createFile(childDir.resolve("build.fake"))
+
+        val resolver = BuildSystemResolver(listOf(fakeProvider))
+        val (provider, dir) = resolver.detect(tempDir)
+        assertEquals("fake", provider.id)
+        assertEquals(childDir, dir)
     }
 
     @Test
@@ -60,8 +82,9 @@ class BuildSystemResolverTest {
         Files.createFile(tempDir.resolve("marker.txt"))
 
         val resolver = BuildSystemResolver(listOf(low, high))
-        val provider = resolver.detect(tempDir)
+        val (provider, dir) = resolver.detect(tempDir)
         assertEquals("high", provider.id)
+        assertEquals(tempDir, dir)
     }
 
     @Test

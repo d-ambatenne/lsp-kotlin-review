@@ -5,6 +5,7 @@ import dev.review.lsp.buildsystem.ModuleInfo
 import dev.review.lsp.buildsystem.ProjectModel
 import org.gradle.tooling.GradleConnector
 import org.gradle.tooling.model.idea.IdeaProject
+import java.io.OutputStream
 import java.nio.file.Path
 
 class GradleProvider : BuildSystemProvider {
@@ -23,7 +24,13 @@ class GradleProvider : BuildSystemProvider {
         }
 
         return try {
-            val ideaProject = connection.getModel(IdeaProject::class.java)
+            // Use model() builder to redirect stdout/stderr away from the LSP
+            // protocol channel (process stdout). Without this, Gradle progress
+            // output (e.g. downloading distributions) corrupts LSP headers.
+            val ideaProject = connection.model(IdeaProject::class.java)
+                .setStandardOutput(OutputStream.nullOutputStream())
+                .setStandardError(OutputStream.nullOutputStream())
+                .get()
             val modules = ideaProject.modules.mapNotNull { ideaModule ->
                 try {
                     resolveModule(ideaModule)

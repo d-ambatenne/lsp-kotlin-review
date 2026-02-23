@@ -13,22 +13,25 @@ class HoverProvider(private val facade: CompilerFacade) {
             val path = UriUtil.toPath(params.textDocument.uri)
             val (line, col) = PositionConverter.fromLspPosition(params.position)
 
-            val symbol = facade.resolveAtPosition(path, line, col) ?: return@supplyAsync null
+            val symbol = facade.resolveAtPosition(path, line, col)
             val typeInfo = facade.getType(path, line, col)
-            val doc = facade.getDocumentation(symbol)
+
+            if (symbol == null && typeInfo == null) return@supplyAsync null
 
             val parts = mutableListOf<String>()
 
-            // Signature
-            symbol.signature?.let { parts.add("```kotlin\n$it\n```") }
+            // Signature from resolved symbol
+            symbol?.signature?.let { parts.add("```kotlin\n$it\n```") }
 
-            // Type info (if different from signature)
-            if (symbol.signature == null && typeInfo != null) {
+            // Type info (if no signature available)
+            if (symbol?.signature == null && typeInfo != null) {
                 parts.add("**Type**: `${typeInfo.shortName}`")
             }
 
             // Documentation
-            doc?.let { parts.add(it) }
+            if (symbol != null) {
+                facade.getDocumentation(symbol)?.let { parts.add(it) }
+            }
 
             if (parts.isEmpty()) return@supplyAsync null
 

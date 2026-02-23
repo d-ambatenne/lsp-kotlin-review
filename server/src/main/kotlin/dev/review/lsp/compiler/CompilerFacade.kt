@@ -26,5 +26,8 @@ interface CompilerFacade {
 
     fun updateFileContent(file: Path, content: String)
 
+    /** Rebuild the analysis session from disk. Called on file save. */
+    fun refreshAnalysis() {}
+
     fun dispose()
 }

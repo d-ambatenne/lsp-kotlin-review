@@ -42,11 +42,24 @@ class AnalysisApiCompilerFacade(
         private const val SYMBOL_CACHE_MAX_SIZE = 128
     }
 
-    private val session by lazy {
+    @Volatile
+    private var _session: org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession? = null
+
+    private val session: org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession
+        get() {
+            var s = _session
+            if (s == null) {
+                s = buildSession()
+                _session = s
+            }
+            return s
+        }
+
+    private fun buildSession(): org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession {
         // Deduplicate classpath jars across all modules
         val allClasspath = projectModel.modules.flatMap { it.classpath }.distinct()
 
-        buildStandaloneAnalysisAPISession {
+        return buildStandaloneAnalysisAPISession {
             buildKtModuleProvider {
                 platform = JvmPlatforms.defaultJvmPlatform
 
@@ -91,12 +104,11 @@ class AnalysisApiCompilerFacade(
             .flatten()
             .filterIsInstance<KtFile>()
 
-    private fun findKtFile(file: Path): KtFile? {
-        return allKtFiles().find { ktFile ->
+    private fun findKtFile(file: Path): KtFile? =
+        allKtFiles().find { ktFile ->
             val ktPath = ktFile.virtualFile?.path?.let { Path.of(it) }
             ktPath != null && (ktPath == file || ktPath.normalize() == file.normalize())
         }
-    }
 
     private fun findElementAt(ktFile: KtFile, line: Int, column: Int): KtElement? {
         val document = ktFile.viewProvider.document ?: return null
@@ -138,6 +150,46 @@ class AnalysisApiCompilerFacade(
         else -> SymbolKind.PROPERTY
     }
 
+    private fun renderSyntheticSignature(symbol: KaSymbol): String? = try {
+        when (symbol) {
+            is KaNamedFunctionSymbol -> buildString {
+                append("fun ")
+                append(symbol.name.asString())
+                append("(")
+                append(symbol.valueParameters.joinToString(", ") { p ->
+                    "${p.name.asString()}: ${p.returnType}"
+                })
+                append("): ")
+                append(symbol.returnType)
+            }
+            is KaClassSymbol -> buildString {
+                append(when (symbol.classKind) {
+                    KaClassKind.INTERFACE -> "interface "
+                    KaClassKind.ENUM_CLASS -> "enum class "
+                    KaClassKind.OBJECT -> "object "
+                    KaClassKind.COMPANION_OBJECT -> "companion object "
+                    KaClassKind.ANNOTATION_CLASS -> "annotation class "
+                    else -> "class "
+                })
+                append(symbol.toString().substringAfterLast('/').substringBefore('(').ifBlank { "?" })
+            }
+            is KaPropertySymbol -> buildString {
+                append(if (symbol.isVal) "val " else "var ")
+                append(symbol.name.asString())
+                append(": ")
+                append(symbol.returnType)
+            }
+            is KaConstructorSymbol -> buildString {
+                append("constructor(")
+                append(symbol.valueParameters.joinToString(", ") { p ->
+                    "${p.name.asString()}: ${p.returnType}"
+                })
+                append(")")
+            }
+            else -> symbol.toString().substringAfterLast('/').substringBefore('(').takeIf { it.isNotBlank() }
+        }
+    } catch (_: Exception) { null }
+
     private fun kaTypeToTypeInfo(type: KaType): TypeInfo {
         val rendered = type.toString()
         val shortName = rendered.substringAfterLast('.')
@@ -156,12 +208,11 @@ class AnalysisApiCompilerFacade(
         return try {
             runOnAnalysisThread {
                 analyze(ktFile) {
-                    ktFile.collectDiagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
-                        .mapNotNull { diagnostic -> mapDiagnostic(diagnostic, file) }
+                    val raw = ktFile.collectDiagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
+                    raw.mapNotNull { diagnostic -> mapDiagnostic(diagnostic, file) }
                 }
             }
         } catch (e: Exception) {
-            // Corrupt .kt files or analysis crashes: skip gracefully
             System.err.println("Diagnostics analysis failed for $file: ${e.message}")
             emptyList()
         }
@@ -171,24 +222,48 @@ class AnalysisApiCompilerFacade(
         val ktFile = findKtFile(file) ?: return null
         return try {
             runOnAnalysisThread {
-                val element = findElementAt(ktFile, line, column) ?: return@runOnAnalysisThread null
+                val element = findElementAt(ktFile, line, column)
+                    ?: return@runOnAnalysisThread null
                 val ref = element as? KtReferenceExpression ?: (element.parent as? KtReferenceExpression)
                 if (ref != null) {
                     analyze(ref) {
-                        val ktRef = ref.references.filterIsInstance<org.jetbrains.kotlin.idea.references.KtReference>().firstOrNull()
+                        val allRefs = ref.references
+                        val ktRef = allRefs.filterIsInstance<org.jetbrains.kotlin.idea.references.KtReference>().firstOrNull()
                             ?: return@analyze null
                         val symbols = ktRef.resolveToSymbols()
                         val symbol = symbols.firstOrNull() ?: return@analyze null
-                        val psi = symbol.psi ?: return@analyze null
-                        val loc = psiToSourceLocation(psi) ?: return@analyze null
-                        ResolvedSymbol(
-                            name = symbol.toString().substringAfterLast('/').substringBefore('('),
-                            kind = mapKaSymbolKind(symbol),
-                            location = loc,
-                            containingClass = (psi.parent as? KtClassOrObject)?.name,
-                            signature = psi.text?.lines()?.firstOrNull()?.take(120),
-                            fqName = null
-                        )
+                        val psi = symbol.psi
+                        // psi.text crashes on compiled class elements (ClsElementImpl)
+                        // with NPE in ClsFileImpl.getMirror(). Use try-catch to detect this.
+                        val psiText = try { psi?.text } catch (_: Exception) { null }
+                        if (psi != null && psiText != null) {
+                            val loc = psiToSourceLocation(psi) ?: return@analyze null
+                            ResolvedSymbol(
+                                name = (psi as? KtNamedDeclaration)?.name
+                                    ?: psiText.lines().firstOrNull()?.trim()?.take(40)
+                                    ?: "unknown",
+                                kind = mapKaSymbolKind(symbol),
+                                location = loc,
+                                containingClass = (psi.parent as? KtClassOrObject)?.name,
+                                signature = psiText.lines().firstOrNull()?.take(120),
+                                fqName = null
+                            )
+                        } else {
+                            // Library type — no readable PSI source available
+                            val sig = renderSyntheticSignature(symbol)
+                            val name = sig?.substringAfter(' ')
+                                ?.substringBefore('(')?.substringBefore(':')
+                                ?.trim()?.ifBlank { null }
+                                ?: "unknown"
+                            ResolvedSymbol(
+                                name = name,
+                                kind = mapKaSymbolKind(symbol),
+                                location = SourceLocation(file, line, column),
+                                containingClass = null,
+                                signature = sig,
+                                fqName = null
+                            )
+                        }
                     }
                 } else null
             }
@@ -231,19 +306,24 @@ class AnalysisApiCompilerFacade(
             symbolCache[file]?.let { return it }
         }
         val ktFile = findKtFile(file) ?: return emptyList()
-        val symbols = runOnAnalysisThread {
-            analyze(ktFile) {
-                val result = mutableListOf<ResolvedSymbol>()
-                ktFile.declarations.forEach { decl ->
-                    collectDeclarationSymbols(decl, file, result)
+        return try {
+            val symbols = runOnAnalysisThread {
+                analyze(ktFile) {
+                    val result = mutableListOf<ResolvedSymbol>()
+                    ktFile.declarations.forEach { decl ->
+                        collectDeclarationSymbols(decl, file, result)
+                    }
+                    result
                 }
-                result
             }
+            synchronized(symbolCache) {
+                symbolCache[file] = symbols
+            }
+            symbols
+        } catch (e: Exception) {
+            System.err.println("getFileSymbols failed for $file: ${e.message}")
+            emptyList()
         }
-        synchronized(symbolCache) {
-            symbolCache[file] = symbols
-        }
-        return symbols
     }
 
     private fun collectDeclarationSymbols(decl: KtDeclaration, file: Path, result: MutableList<ResolvedSymbol>) {
@@ -316,6 +396,21 @@ class AnalysisApiCompilerFacade(
         fileContents[file] = content
         synchronized(symbolCache) {
             symbolCache.remove(file)
+        }
+    }
+
+    override fun refreshAnalysis() {
+        // The standalone Analysis API's PSI/FIR are immutable after session creation.
+        // The only way to pick up file changes is to rebuild the entire session from disk.
+        synchronized(symbolCache) {
+            symbolCache.clear()
+        }
+        try {
+            runOnAnalysisThread {
+                _session = buildSession()
+            }
+        } catch (e: Exception) {
+            System.err.println("Session rebuild failed: ${e.message}")
         }
     }
 

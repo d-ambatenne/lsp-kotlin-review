@@ -6,3 +6,4 @@ esbuild.mjs
 icon.svg
 dist/extension.js.map
 .DS_Store
+~/**

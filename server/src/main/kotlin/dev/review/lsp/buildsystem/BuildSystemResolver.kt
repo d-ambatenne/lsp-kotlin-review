@@ -10,28 +10,57 @@ class BuildSystemResolver(
 ) {
     private val manualProvider = ManualProvider()
 
-    fun detect(workspaceRoot: Path): BuildSystemProvider {
-        val matched = providers.filter { provider ->
-            provider.markerFiles.any { marker ->
-                Files.exists(workspaceRoot.resolve(marker))
+    /**
+     * Detect the build system by checking for marker files at the workspace root
+     * and in immediate child directories. Returns the matched provider and the
+     * directory where it was found.
+     */
+    fun detect(workspaceRoot: Path): Pair<BuildSystemProvider, Path> {
+        // Check workspace root first
+        val rootMatch = findBestProvider(workspaceRoot)
+        if (rootMatch != null) return rootMatch to workspaceRoot
+
+        // Check immediate child directories (monorepo support)
+        try {
+            Files.newDirectoryStream(workspaceRoot) { Files.isDirectory(it) }.use { dirs ->
+                var bestProvider: BuildSystemProvider? = null
+                var bestDir: Path? = null
+                for (dir in dirs) {
+                    val match = findBestProvider(dir)
+                    if (match != null && (bestProvider == null || match.priority > bestProvider.priority)) {
+                        bestProvider = match
+                        bestDir = dir
+                    }
+                }
+                if (bestProvider != null && bestDir != null) {
+                    return bestProvider to bestDir
+                }
             }
+        } catch (_: Exception) {
+            // Directory listing failed, fall through to manual
         }
 
-        return matched
+        return manualProvider to workspaceRoot
+    }
+
+    private fun findBestProvider(dir: Path): BuildSystemProvider? {
+        return providers
+            .filter { provider ->
+                provider.markerFiles.any { marker -> Files.exists(dir.resolve(marker)) }
+            }
             .maxByOrNull { it.priority }
-            ?: manualProvider
     }
 
     suspend fun resolve(workspaceRoot: Path): Pair<BuildSystemProvider, ProjectModel> {
-        val provider = detect(workspaceRoot)
+        val (provider, projectDir) = detect(workspaceRoot)
         return try {
-            val model = provider.resolve(workspaceRoot)
+            val model = provider.resolve(projectDir)
             provider to model
         } catch (e: Exception) {
             if (provider === manualProvider) throw e
             // Gradle (or other provider) failed -- fall back to ManualProvider
             System.err.println("Build system '${provider.id}' failed: ${e.message}, falling back to manual")
-            val model = manualProvider.resolve(workspaceRoot)
+            val model = manualProvider.resolve(projectDir)
             manualProvider to model
         }
     }

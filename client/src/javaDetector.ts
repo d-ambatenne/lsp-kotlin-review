@@ -1,4 +1,4 @@
-import { execFileSync } from "child_process";
+import { spawnSync } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import { getJavaHome } from "./config";
@@ -43,10 +43,32 @@ function buildCandidates(): string[] {
     candidates.push(javaBin(process.env.JDK_HOME));
   }
 
-  // 4. PATH
+  // 4. macOS: /usr/libexec/java_home
+  if (process.platform === "darwin") {
+    const macJavaHome = getMacJavaHome();
+    if (macJavaHome) {
+      candidates.push(javaBin(macJavaHome));
+    }
+  }
+
+  // 5. PATH
   candidates.push("java");
 
   return candidates;
+}
+
+function getMacJavaHome(): string | undefined {
+  try {
+    const result = spawnSync("/usr/libexec/java_home", {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 5000,
+    });
+    const home = (result.stdout || "").trim();
+    return home || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function javaBin(home: string): string {
@@ -60,14 +82,14 @@ function getJavaVersion(javaPath: string): number | undefined {
       return undefined;
     }
 
-    const output = execFileSync(javaPath, ["-version"], {
+    // java -version writes to stderr, so we use spawnSync to capture it
+    const result = spawnSync(javaPath, ["-version"], {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
       timeout: 5000,
     });
 
-    // java -version outputs to stderr, but execFileSync with encoding captures both
-    // The format is: java version "17.0.1" or openjdk version "11.0.12"
+    const output = (result.stderr || "") + (result.stdout || "");
     return parseJavaVersion(output);
   } catch {
     return undefined;

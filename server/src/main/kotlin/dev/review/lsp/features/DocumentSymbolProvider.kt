@@ -11,19 +11,24 @@ class DocumentSymbolProvider(private val facade: CompilerFacade) {
 
     fun documentSymbol(params: DocumentSymbolParams): CompletableFuture<List<DocumentSymbol>> {
         return CompletableFuture.supplyAsync {
-            val path = UriUtil.toPath(params.textDocument.uri)
-            val symbols = facade.getFileSymbols(path)
+            try {
+                val path = UriUtil.toPath(params.textDocument.uri)
+                val symbols = facade.getFileSymbols(path)
 
-            symbols.map { sym ->
-                val pos = Position(sym.location.line, sym.location.column)
-                val range = Range(pos, pos)
-                DocumentSymbol(
-                    sym.name,
-                    toLspSymbolKind(sym.kind),
-                    range,
-                    range,
-                    sym.signature
-                )
+                symbols.map { sym ->
+                    val pos = Position(sym.location.line, sym.location.column)
+                    val range = Range(pos, pos)
+                    DocumentSymbol(
+                        sym.name,
+                        toLspSymbolKind(sym.kind),
+                        range,
+                        range,
+                        sym.signature
+                    )
+                }
+            } catch (e: Exception) {
+                System.err.println("documentSymbol failed: ${e.message}")
+                emptyList()
             }
         }
     }
