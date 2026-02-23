@@ -13,8 +13,9 @@ client/server/*.jar
 *.vsix
 out/
 
-# IDE
+# IDE / tools
 .idea/
+.claude/
 *.iml
 .vscode/.settings/
 
