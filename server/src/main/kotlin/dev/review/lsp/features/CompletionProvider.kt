@@ -24,6 +24,7 @@ class CompletionProvider(private val facade: CompilerFacade) {
                     if (candidate.isDeprecated) {
                         tags = listOf(CompletionItemTag.Deprecated)
                     }
+                    sortText = String.format("%d_%s", candidate.sortPriority, candidate.label.lowercase())
                 }
             }
 

@@ -15,6 +15,7 @@ import org.jetbrains.kotlin.analysis.project.structure.builder.buildKtSdkModule
 import org.jetbrains.kotlin.analysis.project.structure.builder.buildKtSourceModule
 import org.jetbrains.kotlin.platform.jvm.JvmPlatforms
 import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.types.Variance
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
@@ -190,10 +191,10 @@ class AnalysisApiCompilerFacade(
                 append(symbol.name.asString())
                 append("(")
                 append(symbol.valueParameters.joinToString(", ") { p ->
-                    "${p.name.asString()}: ${p.returnType}"
+                    "${p.name.asString()}: ${renderType(p.returnType)}"
                 })
                 append("): ")
-                append(symbol.returnType)
+                append(renderType(symbol.returnType))
             }
             is KaClassSymbol -> buildString {
                 append(when (symbol.classKind) {
@@ -210,7 +211,7 @@ class AnalysisApiCompilerFacade(
                 append(if (symbol.isVal) "val " else "var ")
                 append(symbol.name.asString())
                 append(": ")
-                append(symbol.returnType)
+                append(renderType(symbol.returnType))
             }
             is KaConstructorSymbol -> buildString {
                 val className = symbol.containingClassId?.shortClassName?.asString()
@@ -221,21 +222,66 @@ class AnalysisApiCompilerFacade(
                 }
                 append("(")
                 append(symbol.valueParameters.joinToString(", ") { p ->
-                    "${p.name.asString()}: ${p.returnType}"
+                    "${p.name.asString()}: ${renderType(p.returnType)}"
                 })
                 append(")")
+            }
+            is KaLocalVariableSymbol -> buildString {
+                append(if (symbol.isVal) "val " else "var ")
+                append(symbol.name.asString())
+                append(": ")
+                append(renderType(symbol.returnType))
+            }
+            is KaValueParameterSymbol -> buildString {
+                append(symbol.name.asString())
+                append(": ")
+                append(renderType(symbol.returnType))
             }
             else -> symbolName(symbol)
         }
     } catch (_: Exception) { null }
 
+    /** Render a KaType to a clean Kotlin-syntax string with short names. */
+    private fun renderType(type: KaType): String {
+        val base = when (type) {
+            is KaFunctionType -> {
+                val prefix = if (type.isSuspend) "suspend " else ""
+                val receiver = type.receiverType?.let { "${renderType(it)}." } ?: ""
+                val params = type.parameterTypes.joinToString(", ") { renderType(it) }
+                val ret = renderType(type.returnType)
+                "$prefix${receiver}($params) -> $ret"
+            }
+            is KaClassType -> {
+                val name = type.classId.shortClassName.asString()
+                val args = type.typeArguments
+                if (args.isEmpty()) name
+                else "$name<${args.joinToString(", ") { renderTypeProjection(it) }}>"
+            }
+            is KaTypeParameterType -> type.name.asString()
+            else -> type.toString()
+        }
+        return if (type.nullability == KaTypeNullability.NULLABLE) "$base?" else base
+    }
+
+    private fun renderTypeProjection(projection: KaTypeProjection): String = when (projection) {
+        is KaStarTypeProjection -> "*"
+        is KaTypeArgumentWithVariance -> {
+            val v = when (projection.variance) {
+                Variance.IN_VARIANCE -> "in "
+                Variance.OUT_VARIANCE -> "out "
+                else -> ""
+            }
+            "$v${renderType(projection.type)}"
+        }
+        else -> "*"
+    }
+
     private fun kaTypeToTypeInfo(type: KaType): TypeInfo {
-        val rendered = type.toString()
-        val shortName = rendered.substringAfterLast('.')
+        val rendered = renderType(type)
         return TypeInfo(
-            fqName = rendered,
-            shortName = shortName,
-            nullable = rendered.endsWith("?"),
+            fqName = (type as? KaClassType)?.classId?.asFqNameString() ?: rendered,
+            shortName = rendered,
+            nullable = type.nullability == KaTypeNullability.NULLABLE,
             typeArguments = emptyList()
         )
     }
@@ -320,12 +366,21 @@ class AnalysisApiCompilerFacade(
                             is KtTypeAlias -> SymbolKind.TYPE_ALIAS
                             else -> SymbolKind.PROPERTY
                         }
+                        // For callable declarations without explicit type annotation,
+                        // use the Analysis API to produce a signature with the inferred type
+                        val signature = if (decl is KtCallableDeclaration && decl.typeReference == null) {
+                            try {
+                                analyze(decl) {
+                                    renderSyntheticSignature(decl.symbol)
+                                }
+                            } catch (_: Exception) { null }
+                        } else null
                         ResolvedSymbol(
                             name = decl.name ?: "unknown",
                             kind = kind,
                             location = loc,
                             containingClass = (decl.parent as? KtClassOrObject)?.name,
-                            signature = decl.text?.lines()?.firstOrNull()?.take(120),
+                            signature = signature ?: decl.text?.lines()?.firstOrNull()?.take(120),
                             fqName = (decl as? KtNamedDeclaration)?.fqName?.asString()
                         )
                     } else null
@@ -561,127 +616,244 @@ class AnalysisApiCompilerFacade(
 
     override fun getCompletions(file: Path, line: Int, column: Int): List<CompletionCandidate> {
         val ktFile = findKtFile(file) ?: return emptyList()
+        // Use current buffer for prefix/dot detection (PSI document is stale between saves)
+        val bufferText = fileContents[file]
+            ?: ktFile.viewProvider.document?.charsSequence?.toString()
+            ?: return emptyList()
         return try {
             runOnAnalysisThread {
-                val element = findElementAt(ktFile, line, column)
-                val prefix = extractPrefix(ktFile, line, column)
-                val seen = mutableSetOf<String>()
-                val candidates = mutableListOf<CompletionCandidate>()
+                analyze(ktFile) {
+                    val prefix = extractPrefixFromBuffer(bufferText, line, column)
+                    val seen = mutableSetOf<String>()
+                    val candidates = mutableListOf<CompletionCandidate>()
+                    val limit = 150
 
-                // 1. Local declarations (walk up PSI tree)
-                if (element != null) {
-                    collectLocalCompletions(element, prefix, seen, candidates)
-                }
-
-                // 2. File-level declarations from all project files
-                for (pktFile in allKtFiles()) {
-                    for (decl in pktFile.declarations) {
-                        collectDeclCompletions(decl, prefix, seen, candidates)
+                    val receiverName = detectDotReceiver(bufferText, line, column)
+                    if (receiverName != null) {
+                        collectMemberCompletionsByName(ktFile, receiverName, prefix, seen, candidates, limit)
+                    } else {
+                        val element = findElementAt(ktFile, line, column) ?: ktFile
+                        collectScopeCompletions(element, prefix, seen, candidates, limit)
                     }
-                }
 
-                candidates.take(100)
+                    candidates
+                }
             }
         } catch (e: Exception) {
-            System.err.println("getCompletions failed for $file:$line:$column: ${e.message}")
+            System.err.println("[completion] FAILED for $file:$line:$column: ${e.message}")
             emptyList()
         }
     }
 
-    private fun extractPrefix(ktFile: KtFile, line: Int, column: Int): String {
-        val document = ktFile.viewProvider.document ?: return ""
-        if (line >= document.lineCount) return ""
-        val lineStartOffset = document.getLineStartOffset(line)
-        val cursorOffset = lineStartOffset + column
-        val text = document.charsSequence
+    // ---- Completion helpers ----
+
+    /** Extract the identifier prefix from the current buffer text at cursor position. */
+    private fun extractPrefixFromBuffer(text: String, line: Int, column: Int): String {
+        var lineStart = 0
+        for (i in 0 until line) {
+            val nl = text.indexOf('\n', lineStart)
+            if (nl == -1) return ""
+            lineStart = nl + 1
+        }
+        val cursorOffset = (lineStart + column).coerceAtMost(text.length)
         var start = cursorOffset
-        while (start > lineStartOffset &&
-            (text[start - 1].isLetterOrDigit() || text[start - 1] == '_')) {
+        while (start > lineStart && (text[start - 1].isLetterOrDigit() || text[start - 1] == '_')) {
             start--
         }
         return text.substring(start, cursorOffset)
     }
 
-    private fun collectLocalCompletions(
-        element: KtElement,
+    /**
+     * Detect if the cursor is after a dot and return the receiver name.
+     * Uses current buffer text, not stale PSI. Returns null if not dot completion.
+     */
+    private fun detectDotReceiver(text: String, line: Int, column: Int): String? {
+        var lineStart = 0
+        for (i in 0 until line) {
+            val nl = text.indexOf('\n', lineStart)
+            if (nl == -1) return null
+            lineStart = nl + 1
+        }
+        val cursorOffset = (lineStart + column).coerceAtMost(text.length)
+
+        // Walk backwards past identifier prefix
+        var pos = cursorOffset
+        while (pos > lineStart && (text[pos - 1].isLetterOrDigit() || text[pos - 1] == '_')) {
+            pos--
+        }
+
+        // Check for dot (or safe-access ?.)
+        if (pos > 0 && text[pos - 1] == '.') {
+            val beforeDot = pos - 1
+            // Skip ?. safe access
+            val nameEnd = if (beforeDot > 0 && text[beforeDot - 1] == '?') beforeDot - 1 else beforeDot
+            // Extract identifier before the dot
+            var nameStart = nameEnd
+            while (nameStart > 0 && (text[nameStart - 1].isLetterOrDigit() || text[nameStart - 1] == '_')) {
+                nameStart--
+            }
+            val name = text.substring(nameStart, nameEnd)
+            if (name.isNotEmpty()) return name
+        }
+
+        return null
+    }
+
+    private fun kaSymbolToCandidate(symbol: KaSymbol, name: String, priority: Int): CompletionCandidate {
+        val kind = mapKaSymbolKind(symbol)
+        val detail = try { renderSyntheticSignature(symbol) } catch (_: Exception) { null }
+        val deprecated = false
+        val insertText = when (symbol) {
+            is KaNamedFunctionSymbol -> {
+                if (symbol.valueParameters.isEmpty()) "$name()" else "$name("
+            }
+            is KaConstructorSymbol -> {
+                if (symbol.valueParameters.isEmpty()) "$name()" else "$name("
+            }
+            else -> name
+        }
+        return CompletionCandidate(
+            label = name,
+            kind = kind,
+            detail = detail,
+            insertText = insertText,
+            isDeprecated = deprecated,
+            sortPriority = if (deprecated) 9 else priority
+        )
+    }
+
+    /**
+     * Identifier completion: use scopeContext to enumerate all visible symbols
+     * (locals, file-level, imports, implicit imports like kotlin.*, java.lang.*, etc.)
+     */
+    @OptIn(KaExperimentalApi::class)
+    private fun org.jetbrains.kotlin.analysis.api.KaSession.collectScopeCompletions(
+        element: com.intellij.psi.PsiElement,
         prefix: String,
         seen: MutableSet<String>,
-        candidates: MutableList<CompletionCandidate>
+        candidates: MutableList<CompletionCandidate>,
+        limit: Int
     ) {
-        var current: com.intellij.psi.PsiElement? = element
-        while (current != null && current !is KtFile) {
-            if (current is KtBlockExpression) {
-                for (statement in current.statements) {
-                    if (statement.textOffset >= element.textOffset) break
-                    val decl = statement as? KtNamedDeclaration ?: continue
-                    val name = decl.name ?: continue
-                    if (name in seen) continue
-                    if (prefix.isNotEmpty() && !name.startsWith(prefix, ignoreCase = true)) continue
-                    seen.add(name)
-                    candidates.add(CompletionCandidate(
-                        label = name,
-                        kind = when (decl) {
-                            is KtNamedFunction -> SymbolKind.FUNCTION
-                            else -> SymbolKind.LOCAL_VARIABLE
-                        },
-                        detail = null,
-                        insertText = if (decl is KtNamedFunction) "$name(" else name,
-                        isDeprecated = false
-                    ))
-                }
+        val ktElement = element as? KtElement ?: return
+        val nameFilter: (org.jetbrains.kotlin.name.Name) -> Boolean = if (prefix.isEmpty()) {
+            { true }
+        } else {
+            { name -> name.asString().startsWith(prefix, ignoreCase = true) }
+        }
+
+        val scopeCtx = try {
+            ktElement.containingKtFile.scopeContext(ktElement)
+        } catch (e: Exception) {
+            System.err.println("[completion] scopeContext failed: ${e.message}")
+            return
+        }
+
+        for (scopeWithKind in scopeCtx.scopes) {
+            if (candidates.size >= limit) break
+
+            val priority = scopePriority(scopeWithKind.kind)
+
+            // Skip library/import scopes when prefix is empty (too many results, not useful)
+            if (priority >= 2 && prefix.isEmpty()) continue
+
+            val scope = scopeWithKind.scope
+
+            for (symbol in scope.callables(nameFilter)) {
+                if (candidates.size >= limit) break
+                val name = symbolName(symbol) ?: continue
+                if (name.startsWith("<")) continue
+                if (!seen.add(name)) continue
+                candidates.add(kaSymbolToCandidate(symbol, name, priority))
             }
-            if (current is KtNamedFunction) {
-                for (param in current.valueParameters) {
-                    val name = param.name ?: continue
-                    if (name in seen) continue
-                    if (prefix.isNotEmpty() && !name.startsWith(prefix, ignoreCase = true)) continue
-                    seen.add(name)
-                    candidates.add(CompletionCandidate(
-                        label = name,
-                        kind = SymbolKind.PARAMETER,
-                        detail = param.typeReference?.text?.let { "$name: $it" },
-                        insertText = name,
-                        isDeprecated = false
-                    ))
-                }
+
+            for (symbol in scope.classifiers(nameFilter)) {
+                if (candidates.size >= limit) break
+                val name = symbolName(symbol) ?: continue
+                if (!seen.add(name)) continue
+                candidates.add(kaSymbolToCandidate(symbol, name, priority))
             }
-            current = current.parent
         }
     }
 
-    private fun collectDeclCompletions(
-        decl: KtDeclaration,
+    /**
+     * Dot/member completion: find a declaration by name in PSI, resolve its type,
+     * and enumerate members. Works even when PSI is stale (between saves).
+     */
+    private fun org.jetbrains.kotlin.analysis.api.KaSession.collectMemberCompletionsByName(
+        ktFile: KtFile,
+        receiverName: String,
         prefix: String,
         seen: MutableSet<String>,
-        candidates: MutableList<CompletionCandidate>
+        candidates: MutableList<CompletionCandidate>,
+        limit: Int
     ) {
-        val name = (decl as? KtNamedDeclaration)?.name ?: return
-        if (name in seen) return
-        if (prefix.isNotEmpty() && !name.startsWith(prefix, ignoreCase = true)) return
-        seen.add(name)
-        val kind = when (decl) {
-            is KtClass -> when {
-                decl.isInterface() -> SymbolKind.INTERFACE
-                decl.isEnum() -> SymbolKind.ENUM
-                else -> SymbolKind.CLASS
-            }
-            is KtObjectDeclaration -> SymbolKind.OBJECT
-            is KtNamedFunction -> SymbolKind.FUNCTION
-            is KtProperty -> SymbolKind.PROPERTY
-            is KtTypeAlias -> SymbolKind.TYPE_ALIAS
-            else -> SymbolKind.PROPERTY
+        // Find the declaration by name in the PSI (searches local scope, file scope, etc.)
+        val decl = findDeclarationByName(ktFile, receiverName) ?: return
+        val type = try {
+            (decl.symbol as? KaCallableSymbol)?.returnType ?: return
+        } catch (_: Exception) { return }
+
+        val classSymbol = (type as? KaClassType)?.symbol as? KaClassSymbol ?: return
+        val memberScope = try {
+            classSymbol.combinedMemberScope
+        } catch (e: Exception) {
+            System.err.println("[completion] combinedMemberScope failed: ${e.message}")
+            return
         }
-        candidates.add(CompletionCandidate(
-            label = name,
-            kind = kind,
-            detail = decl.text?.lines()?.firstOrNull()?.take(80),
-            insertText = when (decl) {
-                is KtNamedFunction -> "$name("
-                is KtClass -> name
-                else -> name
-            },
-            isDeprecated = false
-        ))
+
+        val nameFilter: (org.jetbrains.kotlin.name.Name) -> Boolean = if (prefix.isEmpty()) {
+            { true }
+        } else {
+            { name -> name.asString().startsWith(prefix, ignoreCase = true) }
+        }
+
+        for (symbol in memberScope.callables(nameFilter)) {
+            if (candidates.size >= limit) break
+            val name = symbolName(symbol) ?: continue
+            if (name.startsWith("<")) continue
+            if (!seen.add(name)) continue
+            candidates.add(kaSymbolToCandidate(symbol, name, 0))
+        }
+    }
+
+    /** Search a KtFile's PSI tree for a callable declaration matching the given name. */
+    private fun findDeclarationByName(ktFile: KtFile, name: String): KtCallableDeclaration? {
+        // Walk all declarations recursively looking for the name
+        fun search(declarations: List<KtDeclaration>): KtCallableDeclaration? {
+            for (decl in declarations) {
+                if (decl is KtCallableDeclaration && (decl as? KtNamedDeclaration)?.name == name) {
+                    return decl
+                }
+                if (decl is KtClassOrObject) {
+                    search(decl.declarations)?.let { return it }
+                }
+                // Search inside function bodies for local declarations
+                if (decl is KtDeclarationWithBody) {
+                    val body = decl.bodyBlockExpression ?: continue
+                    for (stmt in body.statements) {
+                        if (stmt is KtCallableDeclaration && (stmt as? KtNamedDeclaration)?.name == name) {
+                            return stmt
+                        }
+                    }
+                }
+            }
+            return null
+        }
+        return search(ktFile.declarations)
+    }
+
+    @OptIn(KaExperimentalApi::class)
+    private fun scopePriority(kind: org.jetbrains.kotlin.analysis.api.components.KaScopeKind): Int = when (kind) {
+        is org.jetbrains.kotlin.analysis.api.components.KaScopeKind.LocalScope -> 0
+        is org.jetbrains.kotlin.analysis.api.components.KaScopeKind.TypeScope -> 1
+        is org.jetbrains.kotlin.analysis.api.components.KaScopeKind.PackageMemberScope -> 1
+        is org.jetbrains.kotlin.analysis.api.components.KaScopeKind.StaticMemberScope -> 1
+        is org.jetbrains.kotlin.analysis.api.components.KaScopeKind.ScriptMemberScope -> 1
+        is org.jetbrains.kotlin.analysis.api.components.KaScopeKind.TypeParameterScope -> 1
+        is org.jetbrains.kotlin.analysis.api.components.KaScopeKind.ExplicitSimpleImportingScope -> 2
+        is org.jetbrains.kotlin.analysis.api.components.KaScopeKind.ExplicitStarImportingScope -> 2
+        is org.jetbrains.kotlin.analysis.api.components.KaScopeKind.DefaultSimpleImportingScope -> 3
+        is org.jetbrains.kotlin.analysis.api.components.KaScopeKind.DefaultStarImportingScope -> 3
     }
 
     override fun prepareRename(file: Path, line: Int, column: Int): RenameContext? {

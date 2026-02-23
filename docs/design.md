@@ -297,7 +297,7 @@ data class ResolvedSymbol(
 
 data class TypeInfo(val fqName: String, val shortName: String, val nullable: Boolean, val typeArguments: List<TypeInfo>)
 data class DiagnosticInfo(val severity: Severity, val message: String, val range: SourceRange, val code: String?, val quickFixes: List<QuickFix>)
-data class CompletionCandidate(val label: String, val kind: SymbolKind, val detail: String?, val insertText: String, val isDeprecated: Boolean)
+data class CompletionCandidate(val label: String, val kind: SymbolKind, val detail: String?, val insertText: String, val isDeprecated: Boolean, val sortPriority: Int = 0)
 data class QuickFix(val title: String, val edits: List<FileEdit>)
 data class FileEdit(val path: Path, val range: SourceRange, val newText: String)
 data class RenameContext(val symbol: ResolvedSymbol, val range: SourceRange)
@@ -417,7 +417,7 @@ Each provider receives `CompilerFacade` injected via `KotlinTextDocumentService.
 | TypeDefinitionProvider | `textDocument/typeDefinition` | `getTypeDefinitionLocation()` → resolve type's declaration | Implemented |
 | RenameProvider | `textDocument/rename` | `prepareRename()` → `computeRename()` (reuses `findReferences()`) | Implemented |
 | CodeActionProvider | `textDocument/codeAction` | `getDiagnostics()` → `quickFixes` + Android build hint command | Implemented |
-| CompletionProvider | `textDocument/completion` | `getCompletions()` (local + file-level + project-wide) | Implemented |
+| CompletionProvider | `textDocument/completion` | `getCompletions()` (scope-based: locals, file, imports, stdlib, library deps + dot/member completion) | Implemented |
 
 ## Marketplace Constraints Addressed
 

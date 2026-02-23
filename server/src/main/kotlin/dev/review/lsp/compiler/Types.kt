@@ -67,7 +67,8 @@ data class CompletionCandidate(
     val kind: SymbolKind,
     val detail: String?,
     val insertText: String,
-    val isDeprecated: Boolean
+    val isDeprecated: Boolean,
+    val sortPriority: Int = 0
 )
 
 data class RenameContext(

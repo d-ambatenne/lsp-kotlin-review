@@ -131,3 +131,9 @@ The only reliable path is `_session = buildSession()` which re-reads all files f
 **Decision**: Merge all modules' source roots into a single `KtSourceModule` in the Analysis API session, instead of creating per-module source modules with inter-module dependencies.
 **Rationale**: The standalone Analysis API doesn't support wiring inter-module dependencies (`addRegularDependency` between source modules) without complex dependency graph construction. A single merged module gives full cross-module navigation and completion. The trade-off (no module boundary enforcement) is acceptable for a code review tool.
 **Alternative rejected**: Per-module source modules with dependency wiring (complex, requires tracking which module depends on which)
+
+## ADR-20: Scope-Based Completion with Buffer-Aware Context Detection
+**Decision**: Use the Analysis API's `scopeContext(element)` for identifier completion (replaces manual PSI walking), and text-based dot detection from the current buffer for member completion (replaces PSI `KtDotQualifiedExpression` lookup).
+**Rationale**: The previous completion implementation only walked PSI trees manually, yielding only local and file-level project declarations — no library or stdlib symbols. `scopeContext` returns all visibility layers (local, file, explicit imports, implicit imports like `kotlin.*`, `kotlin.collections.*`, `java.lang.*`) in priority order. For dot/member completion, the PSI document is stale between saves (ADR-16), so dot detection reads from the current buffer (`fileContents`), extracts the receiver name, and resolves it by name search in the saved PSI.
+**Trade-off**: Dot completion requires the receiver declaration to exist in the last-saved PSI. Auto-import (symbols not yet imported) is deferred — `scopeContext` only covers symbols already visible at the position.
+**Alternative rejected**: Global classpath scan for auto-import (expensive, thousands of classes, not needed for code review)

@@ -25,6 +25,8 @@
 13. Diagnostics refresh on save (session rebuild) — added in 0.19.0
 14. P1 features: Go to Implementation, Go to Type Definition, Rename, Quick Fixes, Completion — added in 0.27.0
 15. Android project support (detection, android.jar, generated sources, classpath via init script) — added in 0.45.0
+16. Type inference in hover (inferred types shown for declarations without explicit type annotations) — added in 0.46.0
+17. Library/dependency completion + dot/member completion (scopeContext-based) — added in 0.49.0
 
 ### Explicitly Out of Scope
 - Snippet completion, code generation, refactoring (extract method/variable)
