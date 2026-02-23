@@ -24,6 +24,8 @@ interface CompilerFacade {
 
     fun computeRename(context: RenameContext, newName: String): List<FileEdit>
 
+    fun getTypeDefinitionLocation(file: Path, line: Int, column: Int): SourceLocation? = null
+
     fun updateFileContent(file: Path, content: String)
 
     /** Rebuild the analysis session from disk. Called on file save. */

@@ -9,7 +9,7 @@ import org.jetbrains.kotlin.analysis.api.diagnostics.KaDiagnosticWithPsi
 import org.jetbrains.kotlin.analysis.api.diagnostics.KaSeverity
 import org.jetbrains.kotlin.analysis.api.standalone.buildStandaloneAnalysisAPISession
 import org.jetbrains.kotlin.analysis.api.symbols.*
-import org.jetbrains.kotlin.analysis.api.types.KaType
+import org.jetbrains.kotlin.analysis.api.types.*
 import org.jetbrains.kotlin.analysis.project.structure.builder.buildKtLibraryModule
 import org.jetbrains.kotlin.analysis.project.structure.builder.buildKtSdkModule
 import org.jetbrains.kotlin.analysis.project.structure.builder.buildKtSourceModule
@@ -230,7 +230,7 @@ class AnalysisApiCompilerFacade(
         return try {
             runOnAnalysisThread {
                 analyze(ktFile) {
-                    val raw = ktFile.collectDiagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
+                    val raw = ktFile.collectDiagnostics(KaDiagnosticCheckerFilter.EXTENDED_AND_COMMON_CHECKERS)
                     raw.mapNotNull { diagnostic -> mapDiagnostic(diagnostic, file) }
                 }
             }
@@ -443,13 +443,332 @@ class AnalysisApiCompilerFacade(
         return results
     }
 
-    override fun findImplementations(symbol: ResolvedSymbol): List<SourceLocation> = emptyList()
+    override fun findImplementations(symbol: ResolvedSymbol): List<SourceLocation> {
+        if (symbol.kind != SymbolKind.INTERFACE && symbol.kind != SymbolKind.CLASS) {
+            return emptyList()
+        }
+        return try {
+            runOnAnalysisThread {
+                val results = mutableListOf<SourceLocation>()
+                for (ktFile in allKtFiles()) {
+                    collectImplementations(ktFile, symbol, results)
+                }
+                results
+            }
+        } catch (e: Exception) {
+            System.err.println("findImplementations failed for ${symbol.name}: ${e.message}")
+            emptyList()
+        }
+    }
 
-    override fun getCompletions(file: Path, line: Int, column: Int): List<CompletionCandidate> = emptyList()
+    private fun collectImplementations(
+        ktFile: KtFile,
+        target: ResolvedSymbol,
+        results: MutableList<SourceLocation>
+    ) {
+        for (decl in ktFile.declarations) {
+            collectImplsRecursive(decl, target, results)
+        }
+    }
 
-    override fun prepareRename(file: Path, line: Int, column: Int): RenameContext? = null
+    private fun collectImplsRecursive(
+        decl: KtDeclaration,
+        target: ResolvedSymbol,
+        results: MutableList<SourceLocation>
+    ) {
+        if (decl is KtClassOrObject) {
+            // Cheap text filter: check supertype list for target name
+            val superNames = decl.superTypeListEntries.mapNotNull {
+                it.typeReference?.text?.substringAfterLast('.')
+            }
+            if (superNames.any { it == target.name }) {
+                // Confirm via Analysis API
+                val confirmed = try {
+                    analyze(decl) {
+                        val classSymbol = decl.symbol as? KaClassSymbol ?: return@analyze false
+                        classSymbol.superTypes.any { superType ->
+                            val superClass = (superType as? KaClassType)?.symbol as? KaClassSymbol ?: return@any false
+                            val superFqName = superClass.classId?.asFqNameString()
+                            if (target.fqName != null && superFqName != null) {
+                                superFqName == target.fqName
+                            } else {
+                                val superPsi = superClass.psi
+                                if (superPsi != null) {
+                                    psiToSourceLocation(superPsi) == target.location
+                                } else false
+                            }
+                        }
+                    }
+                } catch (_: Exception) { false }
 
-    override fun computeRename(context: RenameContext, newName: String): List<FileEdit> = emptyList()
+                if (confirmed) {
+                    psiToSourceLocation(decl)?.let { results.add(it) }
+                }
+            }
+            // Recurse into nested classes
+            decl.declarations.forEach { child ->
+                collectImplsRecursive(child, target, results)
+            }
+        }
+    }
+
+    override fun getTypeDefinitionLocation(file: Path, line: Int, column: Int): SourceLocation? {
+        val ktFile = findKtFile(file) ?: return null
+        return try {
+            runOnAnalysisThread {
+                val element = findElementAt(ktFile, line, column) ?: return@runOnAnalysisThread null
+                analyze(ktFile) {
+                    val kaType: KaType? = run {
+                        val decl = element as? KtCallableDeclaration
+                            ?: (element.parent as? KtCallableDeclaration)
+                        if (decl != null) {
+                            return@run (decl.symbol as? KaCallableSymbol)?.returnType
+                        }
+                        val expr = element as? KtExpression
+                            ?: (element.parent as? KtExpression)
+                        expr?.expressionType
+                    }
+                    if (kaType == null) return@analyze null
+                    val classSymbol = (kaType as? KaClassType)?.symbol as? KaClassSymbol ?: return@analyze null
+                    val psi = classSymbol.psi ?: return@analyze null
+                    // Guard against compiled class PSI (ClsElementImpl)
+                    try { psi.text } catch (_: Exception) { return@analyze null }
+                    psiToSourceLocation(psi)
+                }
+            }
+        } catch (e: Exception) {
+            System.err.println("getTypeDefinitionLocation failed for $file:$line:$column: ${e.message}")
+            null
+        }
+    }
+
+    override fun getCompletions(file: Path, line: Int, column: Int): List<CompletionCandidate> {
+        val ktFile = findKtFile(file) ?: return emptyList()
+        return try {
+            runOnAnalysisThread {
+                val element = findElementAt(ktFile, line, column)
+                val prefix = extractPrefix(ktFile, line, column)
+                val seen = mutableSetOf<String>()
+                val candidates = mutableListOf<CompletionCandidate>()
+
+                // 1. Local declarations (walk up PSI tree)
+                if (element != null) {
+                    collectLocalCompletions(element, prefix, seen, candidates)
+                }
+
+                // 2. File-level declarations from all project files
+                for (pktFile in allKtFiles()) {
+                    for (decl in pktFile.declarations) {
+                        collectDeclCompletions(decl, prefix, seen, candidates)
+                    }
+                }
+
+                candidates.take(100)
+            }
+        } catch (e: Exception) {
+            System.err.println("getCompletions failed for $file:$line:$column: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private fun extractPrefix(ktFile: KtFile, line: Int, column: Int): String {
+        val document = ktFile.viewProvider.document ?: return ""
+        if (line >= document.lineCount) return ""
+        val lineStartOffset = document.getLineStartOffset(line)
+        val cursorOffset = lineStartOffset + column
+        val text = document.charsSequence
+        var start = cursorOffset
+        while (start > lineStartOffset &&
+            (text[start - 1].isLetterOrDigit() || text[start - 1] == '_')) {
+            start--
+        }
+        return text.substring(start, cursorOffset)
+    }
+
+    private fun collectLocalCompletions(
+        element: KtElement,
+        prefix: String,
+        seen: MutableSet<String>,
+        candidates: MutableList<CompletionCandidate>
+    ) {
+        var current: com.intellij.psi.PsiElement? = element
+        while (current != null && current !is KtFile) {
+            if (current is KtBlockExpression) {
+                for (statement in current.statements) {
+                    if (statement.textOffset >= element.textOffset) break
+                    val decl = statement as? KtNamedDeclaration ?: continue
+                    val name = decl.name ?: continue
+                    if (name in seen) continue
+                    if (prefix.isNotEmpty() && !name.startsWith(prefix, ignoreCase = true)) continue
+                    seen.add(name)
+                    candidates.add(CompletionCandidate(
+                        label = name,
+                        kind = when (decl) {
+                            is KtNamedFunction -> SymbolKind.FUNCTION
+                            else -> SymbolKind.LOCAL_VARIABLE
+                        },
+                        detail = null,
+                        insertText = if (decl is KtNamedFunction) "$name(" else name,
+                        isDeprecated = false
+                    ))
+                }
+            }
+            if (current is KtNamedFunction) {
+                for (param in current.valueParameters) {
+                    val name = param.name ?: continue
+                    if (name in seen) continue
+                    if (prefix.isNotEmpty() && !name.startsWith(prefix, ignoreCase = true)) continue
+                    seen.add(name)
+                    candidates.add(CompletionCandidate(
+                        label = name,
+                        kind = SymbolKind.PARAMETER,
+                        detail = param.typeReference?.text?.let { "$name: $it" },
+                        insertText = name,
+                        isDeprecated = false
+                    ))
+                }
+            }
+            current = current.parent
+        }
+    }
+
+    private fun collectDeclCompletions(
+        decl: KtDeclaration,
+        prefix: String,
+        seen: MutableSet<String>,
+        candidates: MutableList<CompletionCandidate>
+    ) {
+        val name = (decl as? KtNamedDeclaration)?.name ?: return
+        if (name in seen) return
+        if (prefix.isNotEmpty() && !name.startsWith(prefix, ignoreCase = true)) return
+        seen.add(name)
+        val kind = when (decl) {
+            is KtClass -> when {
+                decl.isInterface() -> SymbolKind.INTERFACE
+                decl.isEnum() -> SymbolKind.ENUM
+                else -> SymbolKind.CLASS
+            }
+            is KtObjectDeclaration -> SymbolKind.OBJECT
+            is KtNamedFunction -> SymbolKind.FUNCTION
+            is KtProperty -> SymbolKind.PROPERTY
+            is KtTypeAlias -> SymbolKind.TYPE_ALIAS
+            else -> SymbolKind.PROPERTY
+        }
+        candidates.add(CompletionCandidate(
+            label = name,
+            kind = kind,
+            detail = decl.text?.lines()?.firstOrNull()?.take(80),
+            insertText = when (decl) {
+                is KtNamedFunction -> "$name("
+                is KtClass -> name
+                else -> name
+            },
+            isDeprecated = false
+        ))
+    }
+
+    override fun prepareRename(file: Path, line: Int, column: Int): RenameContext? {
+        val ktFile = findKtFile(file) ?: return null
+        return try {
+            runOnAnalysisThread {
+                val element = findElementAt(ktFile, line, column)
+                    ?: return@runOnAnalysisThread null
+
+                // Find the declaration: directly or via reference resolution
+                val declaration: KtNamedDeclaration? = run {
+                    val directDecl = element as? KtNamedDeclaration
+                        ?: (element.parent as? KtNamedDeclaration)
+                    if (directDecl != null) return@run directDecl
+
+                    val ref = element as? KtReferenceExpression
+                        ?: (element.parent as? KtReferenceExpression)
+                    if (ref != null) {
+                        analyze(ref) {
+                            val ktRef = ref.references
+                                .filterIsInstance<org.jetbrains.kotlin.idea.references.KtReference>()
+                                .firstOrNull() ?: return@analyze null
+                            val symbol = ktRef.resolveToSymbols().firstOrNull() ?: return@analyze null
+                            symbol.psi as? KtNamedDeclaration
+                        }
+                    } else null
+                }
+                if (declaration == null) return@runOnAnalysisThread null
+
+                val nameIdentifier = declaration.nameIdentifier ?: return@runOnAnalysisThread null
+                val name = declaration.name ?: return@runOnAnalysisThread null
+                if (declaration is KtPackageDirective) return@runOnAnalysisThread null
+
+                val document = declaration.containingFile?.viewProvider?.document
+                    ?: return@runOnAnalysisThread null
+                val filePath = declaration.containingFile?.virtualFile?.path?.let { Path.of(it) }
+                    ?: return@runOnAnalysisThread null
+
+                val startOffset = nameIdentifier.textOffset
+                val endOffset = startOffset + name.length
+                val startLine = document.getLineNumber(startOffset)
+                val startCol = startOffset - document.getLineStartOffset(startLine)
+                val endLine = document.getLineNumber(endOffset)
+                val endCol = endOffset - document.getLineStartOffset(endLine)
+
+                val range = SourceRange(filePath, startLine, startCol, endLine, endCol)
+                val loc = SourceLocation(filePath, startLine, startCol)
+
+                val kind = when (declaration) {
+                    is KtClass -> when {
+                        declaration.isInterface() -> SymbolKind.INTERFACE
+                        declaration.isEnum() -> SymbolKind.ENUM
+                        else -> SymbolKind.CLASS
+                    }
+                    is KtObjectDeclaration -> SymbolKind.OBJECT
+                    is KtNamedFunction -> SymbolKind.FUNCTION
+                    is KtProperty -> SymbolKind.PROPERTY
+                    is KtParameter -> SymbolKind.PARAMETER
+                    is KtTypeAlias -> SymbolKind.TYPE_ALIAS
+                    else -> SymbolKind.PROPERTY
+                }
+
+                RenameContext(
+                    symbol = ResolvedSymbol(
+                        name = name,
+                        kind = kind,
+                        location = loc,
+                        containingClass = (declaration.parent as? KtClassOrObject)?.name,
+                        signature = declaration.text?.lines()?.firstOrNull()?.take(120),
+                        fqName = declaration.fqName?.asString()
+                    ),
+                    range = range
+                )
+            }
+        } catch (e: Exception) {
+            System.err.println("prepareRename failed for $file:$line:$column: ${e.message}")
+            null
+        }
+    }
+
+    override fun computeRename(context: RenameContext, newName: String): List<FileEdit> {
+        return try {
+            val references = findReferences(context.symbol)
+            val edits = mutableListOf<FileEdit>()
+
+            // Include the declaration itself
+            edits.add(FileEdit(context.range.path, context.range, newName))
+
+            // Include all references (skip if same as declaration)
+            val declRange = context.range
+            for (ref in references) {
+                if (ref.path == declRange.path && ref.line == declRange.startLine && ref.column == declRange.startColumn) {
+                    continue
+                }
+                val oldName = context.symbol.name
+                val refRange = SourceRange(ref.path, ref.line, ref.column, ref.line, ref.column + oldName.length)
+                edits.add(FileEdit(ref.path, refRange, newName))
+            }
+            edits
+        } catch (e: Exception) {
+            System.err.println("computeRename failed for ${context.symbol.name}: ${e.message}")
+            emptyList()
+        }
+    }
 
     override fun updateFileContent(file: Path, content: String) {
         fileContents[file] = content
@@ -494,14 +813,59 @@ class AnalysisApiCompilerFacade(
         val endLine = document.getLineNumber(textRange.endOffset)
         val endCol = textRange.endOffset - document.getLineStartOffset(endLine)
 
+        val range = SourceRange(file, startLine, startCol, endLine, endCol)
+        System.err.println("[DIAG] factoryName='${diagnostic.factoryName}' severity=${diagnostic.severity} psi=${psi.javaClass.simpleName} msg='${diagnostic.defaultMessage.take(60)}'")
+        val quickFixes = generateQuickFixes(diagnostic, psi, file, document)
+
         return DiagnosticInfo(
             severity = mapSeverity(diagnostic.severity),
             message = diagnostic.defaultMessage,
-            range = SourceRange(file, startLine, startCol, endLine, endCol),
+            range = range,
             code = diagnostic.factoryName,
-            quickFixes = emptyList()
+            quickFixes = quickFixes
         )
     }
+
+    private fun generateQuickFixes(
+        diagnostic: KaDiagnosticWithPsi<*>,
+        psi: com.intellij.psi.PsiElement,
+        file: Path,
+        document: com.intellij.openapi.editor.Document
+    ): List<QuickFix> = try {
+        when (diagnostic.factoryName) {
+            "UNUSED_VARIABLE", "UNUSED_PARAMETER" -> {
+                val decl = psi as? KtNamedDeclaration ?: (psi.parent as? KtNamedDeclaration)
+                val name = decl?.name
+                val nameId = decl?.nameIdentifier
+                if (name != null && !name.startsWith("_") && nameId != null) {
+                    val offset = nameId.textOffset
+                    val endOffset = offset + name.length
+                    val sLine = document.getLineNumber(offset)
+                    val sCol = offset - document.getLineStartOffset(sLine)
+                    val eLine = document.getLineNumber(endOffset)
+                    val eCol = endOffset - document.getLineStartOffset(eLine)
+                    listOf(QuickFix(
+                        title = "Rename to '_$name'",
+                        edits = listOf(FileEdit(file, SourceRange(file, sLine, sCol, eLine, eCol), "_$name"))
+                    ))
+                } else emptyList()
+            }
+            "REDUNDANT_NULLABLE" -> {
+                val text = try { psi.text } catch (_: Exception) { null }
+                if (text != null && text.endsWith("?")) {
+                    val sLine = document.getLineNumber(psi.textRange.startOffset)
+                    val sCol = psi.textRange.startOffset - document.getLineStartOffset(sLine)
+                    val eLine = document.getLineNumber(psi.textRange.endOffset)
+                    val eCol = psi.textRange.endOffset - document.getLineStartOffset(eLine)
+                    listOf(QuickFix(
+                        title = "Remove redundant '?'",
+                        edits = listOf(FileEdit(file, SourceRange(file, sLine, sCol, eLine, eCol), text.dropLast(1)))
+                    ))
+                } else emptyList()
+            }
+            else -> emptyList()
+        }
+    } catch (_: Exception) { emptyList() }
 
     private fun mapSeverity(severity: KaSeverity): Severity = when (severity) {
         KaSeverity.ERROR -> Severity.ERROR

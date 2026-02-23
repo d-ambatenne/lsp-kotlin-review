@@ -13,12 +13,10 @@ class TypeDefinitionProvider(private val facade: CompilerFacade) {
         return CompletableFuture.supplyAsync {
             val path = UriUtil.toPath(params.textDocument.uri)
             val (line, col) = PositionConverter.fromLspPosition(params.position)
-            val typeInfo = facade.getType(path, line, col)
+            val location = facade.getTypeDefinitionLocation(path, line, col)
                 ?: return@supplyAsync Either.forLeft(emptyList())
 
-            // Try to resolve the type's declaration location
-            // For now, return empty since we'd need a type-to-location lookup
-            Either.forLeft(emptyList<Location>())
+            Either.forLeft(listOf(PositionConverter.toLspLocation(location)))
         }
     }
 }
