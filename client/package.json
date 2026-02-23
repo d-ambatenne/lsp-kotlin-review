@@ -2,7 +2,7 @@
   "name": "kotlin-review",
   "displayName": "Kotlin Review",
   "description": "Kotlin language support for code review and small changes",
-  "version": "0.19.0",
+  "version": "0.23.0",
   "publisher": "kotlin-review",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -37,10 +37,19 @@
     "languages": [
       {
         "id": "kotlin",
+        "aliases": ["Kotlin", "kotlin"],
         "extensions": [
           ".kt",
           ".kts"
-        ]
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "kotlin",
+        "scopeName": "source.kotlin",
+        "path": "./syntaxes/kotlin.tmLanguage.json"
       }
     ],
     "configuration": {

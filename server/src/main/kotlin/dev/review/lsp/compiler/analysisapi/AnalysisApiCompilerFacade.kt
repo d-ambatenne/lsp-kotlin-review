@@ -150,6 +150,22 @@ class AnalysisApiCompilerFacade(
         else -> SymbolKind.PROPERTY
     }
 
+    /** Extract a clean name from a KaSymbol (works for both source and library symbols). */
+    private fun symbolName(symbol: KaSymbol): String? = try {
+        when (symbol) {
+            is KaNamedFunctionSymbol -> symbol.name.asString()
+            is KaPropertySymbol -> symbol.name.asString()
+            is KaValueParameterSymbol -> symbol.name.asString()
+            is KaLocalVariableSymbol -> symbol.name.asString()
+            is KaEnumEntrySymbol -> symbol.name.asString()
+            is KaTypeParameterSymbol -> symbol.name.asString()
+            is KaTypeAliasSymbol -> symbol.classId?.shortClassName?.asString()
+            is KaClassSymbol -> symbol.classId?.shortClassName?.asString()
+            is KaConstructorSymbol -> symbol.containingClassId?.shortClassName?.asString()
+            else -> null
+        }
+    } catch (_: Exception) { null }
+
     private fun renderSyntheticSignature(symbol: KaSymbol): String? = try {
         when (symbol) {
             is KaNamedFunctionSymbol -> buildString {
@@ -171,7 +187,7 @@ class AnalysisApiCompilerFacade(
                     KaClassKind.ANNOTATION_CLASS -> "annotation class "
                     else -> "class "
                 })
-                append(symbol.toString().substringAfterLast('/').substringBefore('(').ifBlank { "?" })
+                append(symbol.classId?.asFqNameString() ?: symbolName(symbol) ?: "?")
             }
             is KaPropertySymbol -> buildString {
                 append(if (symbol.isVal) "val " else "var ")
@@ -180,13 +196,19 @@ class AnalysisApiCompilerFacade(
                 append(symbol.returnType)
             }
             is KaConstructorSymbol -> buildString {
-                append("constructor(")
+                val className = symbol.containingClassId?.shortClassName?.asString()
+                if (className != null) {
+                    append(className)
+                } else {
+                    append("constructor")
+                }
+                append("(")
                 append(symbol.valueParameters.joinToString(", ") { p ->
                     "${p.name.asString()}: ${p.returnType}"
                 })
                 append(")")
             }
-            else -> symbol.toString().substringAfterLast('/').substringBefore('(').takeIf { it.isNotBlank() }
+            else -> symbolName(symbol)
         }
     } catch (_: Exception) { null }
 
@@ -251,10 +273,7 @@ class AnalysisApiCompilerFacade(
                         } else {
                             // Library type — no readable PSI source available
                             val sig = renderSyntheticSignature(symbol)
-                            val name = sig?.substringAfter(' ')
-                                ?.substringBefore('(')?.substringBefore(':')
-                                ?.trim()?.ifBlank { null }
-                                ?: "unknown"
+                            val name = symbolName(symbol) ?: "unknown"
                             ResolvedSymbol(
                                 name = name,
                                 kind = mapKaSymbolKind(symbol),
@@ -265,7 +284,35 @@ class AnalysisApiCompilerFacade(
                             )
                         }
                     }
-                } else null
+                } else {
+                    // Not a reference — check if it's a declaration (val, fun, class, etc.)
+                    val decl = element as? KtNamedDeclaration
+                        ?: (element.parent as? KtNamedDeclaration)
+                    if (decl != null) {
+                        val loc = psiToSourceLocation(decl) ?: return@runOnAnalysisThread null
+                        val kind = when (decl) {
+                            is KtClass -> when {
+                                decl.isInterface() -> SymbolKind.INTERFACE
+                                decl.isEnum() -> SymbolKind.ENUM
+                                else -> SymbolKind.CLASS
+                            }
+                            is KtObjectDeclaration -> SymbolKind.OBJECT
+                            is KtNamedFunction -> SymbolKind.FUNCTION
+                            is KtProperty -> SymbolKind.PROPERTY
+                            is KtParameter -> SymbolKind.PARAMETER
+                            is KtTypeAlias -> SymbolKind.TYPE_ALIAS
+                            else -> SymbolKind.PROPERTY
+                        }
+                        ResolvedSymbol(
+                            name = decl.name ?: "unknown",
+                            kind = kind,
+                            location = loc,
+                            containingClass = (decl.parent as? KtClassOrObject)?.name,
+                            signature = decl.text?.lines()?.firstOrNull()?.take(120),
+                            fqName = (decl as? KtNamedDeclaration)?.fqName?.asString()
+                        )
+                    } else null
+                }
             }
         } catch (e: Exception) {
             System.err.println("resolveAtPosition failed for $file:$line:$column: ${e.message}")
@@ -278,6 +325,18 @@ class AnalysisApiCompilerFacade(
         return try {
             runOnAnalysisThread {
                 val element = findElementAt(ktFile, line, column) ?: return@runOnAnalysisThread null
+
+                // For declarations (val, var, fun, parameter), get the declared/inferred type
+                val decl = element as? KtCallableDeclaration
+                    ?: (element.parent as? KtCallableDeclaration)
+                if (decl != null) {
+                    return@runOnAnalysisThread analyze(decl) {
+                        val symbol = decl.symbol as? KaCallableSymbol ?: return@analyze null
+                        kaTypeToTypeInfo(symbol.returnType)
+                    }
+                }
+
+                // For expressions, get the expression type
                 val expr = element as? KtExpression ?: (element.parent as? KtExpression)
                     ?: return@runOnAnalysisThread null
                 analyze(expr) {
@@ -407,6 +466,9 @@ class AnalysisApiCompilerFacade(
         }
         try {
             runOnAnalysisThread {
+                // Release old session to free memory before building a new one
+                _session = null
+                System.gc()
                 _session = buildSession()
             }
         } catch (e: Exception) {

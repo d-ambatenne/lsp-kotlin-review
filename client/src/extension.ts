@@ -28,10 +28,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const jarPath = path.join(context.extensionPath, "server", "server-all.jar");
 
   const defaultJvmArgs = [
-    "-Xmx512m",
+    "-Xmx2g",
     "-XX:+UseG1GC",
-    "-XX:+TieredCompilation",
-    "-XX:TieredStopAtLevel=1",
   ];
   const userJvmArgs = getServerJvmArgs();
 
