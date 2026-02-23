@@ -4,6 +4,28 @@ All notable changes to the Kotlin Review LSP extension will be documented in thi
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.45.0] - 2026-02-23
+
+### Added
+
+- **Android project support**: auto-detect Android modules via AndroidManifest.xml / build.gradle plugin declarations, add `android.jar` from `ANDROID_HOME`, scan `build/generated/` for R class, BuildConfig, KSP, and KAPT sources
+- **Gradle init script classpath resolution**: resolve `debugCompileClasspath` for Android modules where `IdeaProject`/`EclipseProject` models return empty dependencies (ADR-18)
+- **Merged source module**: all modules' source roots merged into a single Analysis API module for cross-module resolution without dependency graph wiring (ADR-19)
+- **Conventional source root fallback**: for Android modules where Gradle doesn't report source dirs, scan for `src/main/java`, `src/main/kotlin`, `src/debug/*`, `src/test/*`, `src/androidTest/*`
+- **Android build hint notification**: shown when Android modules lack `build/generated/` directory
+- **Enhanced UNRESOLVED_REFERENCE diagnostics**: append "(may be a generated class)" hint for Android projects missing generated sources
+- **Code action "Run Gradle code generation"**: lightbulb action on unresolved references that opens terminal with `./gradlew generateDebugResources generateDebugBuildConfig --continue` in the correct project directory
+- **P1 features implemented**:
+  - **Go to Implementation**: scan project for class/object declarations whose supertypes match target interface/class
+  - **Go to Type Definition**: resolve cursor type to its declaration source location via `KaClassType.symbol`
+  - **Rename Symbol**: find declaration + all references, generate `FileEdit` for each
+  - **Quick Fixes**: `UNUSED_VARIABLE`/`UNUSED_PARAMETER` → rename to `_name`, `REDUNDANT_NULLABLE` → remove `?`
+  - **Basic Completion**: local declarations + function parameters + top-level project declarations, filtered by prefix
+- Switch diagnostics from `ONLY_COMMON_CHECKERS` to `EXTENDED_AND_COMMON_CHECKERS` (unused variable/parameter warnings)
+- `getTypeDefinitionLocation()` method added to `CompilerFacade`
+- `isAndroid` flag on `ModuleInfo`, `projectDir` on `ProjectModel`
+- `kotlinReview.generateSources` VS Code command
+
 ## [0.23.0] - 2026-02-23
 
 ### Added

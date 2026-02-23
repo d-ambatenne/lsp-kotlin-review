@@ -200,7 +200,8 @@ Pluggable architecture for resolving project classpath and source roots from any
 **Unified project model:**
 ```kotlin
 data class ProjectModel(
-    val modules: List<ModuleInfo>
+    val modules: List<ModuleInfo>,
+    val projectDir: Path? = null       // detected Gradle project directory
 )
 
 data class ModuleInfo(
@@ -210,7 +211,8 @@ data class ModuleInfo(
     val classpath: List<Path>,
     val testClasspath: List<Path>,
     val kotlinVersion: String?,
-    val jvmTarget: String?
+    val jvmTarget: String?,
+    val isAndroid: Boolean = false      // detected via AndroidManifest/build.gradle/classpath
 )
 ```
 
@@ -247,7 +249,7 @@ Detection logic:
 
 | Provider | Marker Files | Strategy | Status |
 |---|---|---|---|
-| `GradleProvider` | `build.gradle.kts`, `build.gradle`, `settings.gradle.kts`, `settings.gradle` | Gradle Tooling API — query `IdeaProject` model for source sets + classpath. Per-module error handling (skips failed modules). | **Implemented** |
+| `GradleProvider` | `build.gradle.kts`, `build.gradle`, `settings.gradle.kts`, `settings.gradle` | Gradle Tooling API — query `IdeaProject` model for source sets + classpath. Android enrichment: detect Android modules, add `android.jar`, scan `build/generated/` for generated sources, resolve classpath via init script when `IdeaProject` returns empty (ADR-18). Conventional source root fallback for Android modules. Per-module error handling. | **Implemented** |
 | `MavenProvider` | `pom.xml` | Shell out to `mvn dependency:build-classpath` + parse POM for source dirs | **future** |
 | `BazelProvider` | `WORKSPACE`, `WORKSPACE.bazel`, `MODULE.bazel` | Shell out to `bazel query` + `bazel cquery` for deps | **future** |
 | `ManualProvider` | *(fallback)* | Scan for `src/main/kotlin`, `src/main/java`, `src/test/kotlin`, `src/kotlin`, `src`. No classpath. | **Implemented** |
@@ -323,16 +325,16 @@ class AnalysisApiCompilerFacade(
     private fun buildSession(): StandaloneAnalysisAPISession {
         return buildStandaloneAnalysisAPISession {
             buildKtModuleProvider {
-                // 1. Library modules (deduplicated classpath JARs)
+                // 1. Library modules (deduplicated classpath JARs from all modules)
                 // 2. JDK module (from java.home)
-                // 3. Per-module source modules (multi-module support)
+                // 3. Single merged source module (all modules' source roots — ADR-19)
             }
         }
     }
 
     override fun getDiagnostics(file): List<DiagnosticInfo> {
-        // analyze(ktFile) { ktFile.collectDiagnostics(ONLY_COMMON_CHECKERS) }
-        // Maps KaDiagnosticWithPsi -> DiagnosticInfo with try/catch for corrupt files
+        // analyze(ktFile) { ktFile.collectDiagnostics(EXTENDED_AND_COMMON_CHECKERS) }
+        // Maps KaDiagnosticWithPsi -> DiagnosticInfo with quick fixes + Android hints
     }
 
     override fun resolveAtPosition(file, line, column): ResolvedSymbol? {
@@ -411,13 +413,11 @@ Each provider receives `CompilerFacade` injected via `KotlinTextDocumentService.
 | ReferencesProvider | `textDocument/references` | `resolveAtPosition()` → `findReferences()` | Implemented |
 | HoverProvider | `textDocument/hover` | `resolveAtPosition()` + `getType()` + `getDocumentation()` → markdown | Implemented |
 | DocumentSymbolProvider | `textDocument/documentSymbol` | `getFileSymbols()` → DocumentSymbol hierarchy | Implemented |
-| ImplementationProvider | `textDocument/implementation` | `resolveAtPosition()` → `findImplementations()` | Wired (facade stub) |
-| TypeDefinitionProvider | `textDocument/typeDefinition` | `getType()` → resolve type's declaration location | Wired (facade stub) |
-| RenameProvider | `textDocument/rename` | `prepareRename()` → `computeRename()` | Wired (facade stub) |
-| CodeActionProvider | `textDocument/codeAction` | `getDiagnostics()` → extract `quickFixes` | Implemented (depends on facade quickFixes) |
-| CompletionProvider | `textDocument/completion` | `getCompletions()` | Wired (facade stub) |
-
-"Wired (facade stub)" means the LSP provider dispatches correctly to the CompilerFacade, but the facade method returns empty/null. These can be implemented incrementally behind the stable interface.
+| ImplementationProvider | `textDocument/implementation` | `resolveAtPosition()` → `findImplementations()` | Implemented |
+| TypeDefinitionProvider | `textDocument/typeDefinition` | `getTypeDefinitionLocation()` → resolve type's declaration | Implemented |
+| RenameProvider | `textDocument/rename` | `prepareRename()` → `computeRename()` (reuses `findReferences()`) | Implemented |
+| CodeActionProvider | `textDocument/codeAction` | `getDiagnostics()` → `quickFixes` + Android build hint command | Implemented |
+| CompletionProvider | `textDocument/completion` | `getCompletions()` (local + file-level + project-wide) | Implemented |
 
 ## Marketplace Constraints Addressed
 
@@ -473,11 +473,11 @@ Each provider receives `CompilerFacade` injected via `KotlinTextDocumentService.
 | File symbols | LRU cache (128 entries) in `AnalysisApiCompilerFacade`, invalidated on `updateFileContent` |
 
 ### Multi-Module Support (Implemented)
-- `GradleProvider` returns all modules from `IdeaProject`
-- `AnalysisApiCompilerFacade` creates per-module `KtSourceModule` entries in the standalone session
-- Classpath JARs deduplicated across modules (shared library modules)
+- `GradleProvider` returns all modules from `IdeaProject` (with Android enrichment for AGP modules)
+- `AnalysisApiCompilerFacade` merges all source roots into a single `KtSourceModule` (ADR-19) for cross-module resolution without inter-module dependency wiring
+- Classpath JARs deduplicated across all modules (shared library modules)
 - JDK module shared across all source modules
-- Cross-module go-to-definition works through the shared analysis session
+- Cross-module go-to-definition, find references, rename all work through the merged session
 
 ### Target Latencies
 
@@ -518,7 +518,7 @@ Automated via `scripts/build.sh` (steps 1-3) and `scripts/package.sh` (all steps
 
 ## Resolved Questions
 - ~~Gradle/Maven project detection~~: **Resolved (ADR-12)** — Pluggable BuildSystemProvider SPI. Gradle Tooling API in v1, others via future providers. Gradle failure falls back to Manual.
-- ~~Multi-module projects~~: **Resolved & Implemented** — ProjectModel supports multiple ModuleInfo entries. GradleProvider returns all modules. AnalysisApiCompilerFacade creates per-module source modules with shared library/JDK modules. Cross-module navigation works.
+- ~~Multi-module projects~~: **Resolved (ADR-19)** — All modules' source roots merged into a single `KtSourceModule`. Classpath deduplicated. Cross-module navigation, references, and rename work. Android modules get conventional source roots + init-script classpath resolution (ADR-18).
 - ~~Kotlin compiler version~~: **Resolved (ADR-15)** — Using Kotlin Analysis API 2.1.0. All `-for-ide` artifacts pinned with `isTransitive = false`. CompilerFacade abstraction (ADR-14) isolates version-specific breakage.
 - ~~Analysis API threading~~: **Resolved** — All `analyze {}` calls serialized through a single-threaded `ExecutorService`. The standalone session does not support concurrent `analyze {}` calls.
 - ~~Analysis API incremental updates~~: **Resolved (ADR-16)** — The standalone session's PSI/FIR trees are immutable. `document.setText()`, `replaceAllChildrenToChildrenOf()`, and raw tree operations all fail. On `didSave`, the entire session is rebuilt via `refreshAnalysis()`. Diagnostics update on save only.
@@ -528,5 +528,5 @@ Automated via `scripts/build.sh` (steps 1-3) and `scripts/package.sh` (all steps
 - **Kotlin**: 2.0+ (Analysis API 2.1.0 / K2/FIR)
 - **Gradle**: 6.0+ (Tooling API 8.12 connects to any project Gradle version)
 - **JVM**: Java 17+ required
-- **Android**: Partially supported (Kotlin analysis works; Android-specific generated code may show unresolved references)
+- **Android**: Supported. Auto-detects Android modules, adds `android.jar` from `ANDROID_HOME`, resolves classpath via init script (ADR-18), scans `build/generated/` for R/BuildConfig/KSP sources. Generated code (KSP/KAPT) requires running `./gradlew generateDebugResources generateDebugBuildConfig` once. Notification + code action provided.
 - **KMP**: Not currently supported (JVM-only source modules configured)

@@ -23,6 +23,8 @@
 11. Syntax Highlighting (TextMate grammar) — added in 0.19.0
 12. Hover for library types (synthetic signatures) — added in 0.16.0
 13. Diagnostics refresh on save (session rebuild) — added in 0.19.0
+14. P1 features: Go to Implementation, Go to Type Definition, Rename, Quick Fixes, Completion — added in 0.27.0
+15. Android project support (detection, android.jar, generated sources, classpath via init script) — added in 0.45.0
 
 ### Explicitly Out of Scope
 - Snippet completion, code generation, refactoring (extract method/variable)

@@ -119,3 +119,15 @@ The only reliable path is `_session = buildSession()` which re-reads all files f
 **Decision**: Use a TextMate grammar (`.tmLanguage.json`) for syntax highlighting instead of LSP semantic tokens.
 **Rationale**: TextMate grammars are client-side, regex-based, and instant — no server roundtrip required. They work even before the server initializes. Semantic tokens (LSP) would require server-side Analysis API integration and are explicitly deferred. The grammar covers keywords, comments, strings (including `${}` interpolation), numbers, annotations, declarations, operators, and Kotlin-specific syntax.
 **Alternative rejected**: LSP semantic tokens (requires server work, adds latency, deferred per scope.md)
+
+## ADR-18: Android Classpath Resolution via Gradle Init Script
+**Decision**: Use a temporary Gradle init script to resolve `debugCompileClasspath` for Android modules, since the standard `IdeaProject` and `EclipseProject` Gradle models don't report dependencies for AGP modules.
+**Rationale**: The Android Gradle Plugin doesn't populate the standard Gradle IDE models (`IdeaModule.dependencies`, `EclipseProject.classpath`) for Android modules. Only pure Kotlin/JVM modules get their dependencies reported. The init script creates a `lspResolveClasspath` task that resolves `debugCompileClasspath` (with `releaseCompileClasspath` and `compileClasspath` fallbacks) using lenient resolution to tolerate partial failures.
+**Trade-off**: Adds ~1-2 seconds to project initialization. Some Android modules with complex dependency graphs may still fail to resolve (lenient resolution silently skips unresolvable transitive deps). Users can run `./gradlew assembleDebug` for full resolution.
+**Alternative rejected**: AGP-specific model API (requires adding `com.android.tools.build:builder-model` dependency, version coupling)
+**Alternative rejected**: Scanning Gradle cache directly (fragile, cache layout varies across Gradle versions)
+
+## ADR-19: Merged Source Module for Cross-Module Resolution
+**Decision**: Merge all modules' source roots into a single `KtSourceModule` in the Analysis API session, instead of creating per-module source modules with inter-module dependencies.
+**Rationale**: The standalone Analysis API doesn't support wiring inter-module dependencies (`addRegularDependency` between source modules) without complex dependency graph construction. A single merged module gives full cross-module navigation and completion. The trade-off (no module boundary enforcement) is acceptable for a code review tool.
+**Alternative rejected**: Per-module source modules with dependency wiring (complex, requires tracking which module depends on which)

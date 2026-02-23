@@ -40,7 +40,19 @@ The Gradle Tooling API 8.12 is used for classpath resolution. Compatible with **
 
 ### Android projects
 
-**Partially supported.** Android/Gradle projects are detected and their source roots and classpath are resolved. Standard Kotlin code analysis works (diagnostics, navigation, hover, completion). However, Android-specific APIs (e.g. `R` class references, generated code from ViewBinding/DataBinding, Compose compiler plugin outputs) may show unresolved reference errors since the extension does not run the Android Gradle Plugin's code generation tasks.
+**Supported.** The extension auto-detects Android modules, adds `android.jar` from `ANDROID_HOME`, resolves library dependencies via Gradle init script, and scans `build/generated/` for R class, BuildConfig, KSP, and KAPT generated sources.
+
+**First-time setup:** For generated code (R class, BuildConfig, annotation processor outputs), run once:
+```bash
+./gradlew generateDebugResources generateDebugBuildConfig --continue
+```
+The extension shows a notification and offers a code action (lightbulb) to run this command when generated sources are missing.
+
+**Known limitations:**
+- KSP/KAPT-generated classes (e.g. Hilt components, Room DAOs) require a full build (`./gradlew assembleDebug`)
+- Some Android projects with complex dependency graphs may have partial library resolution — running `./gradlew assembleDebug` once resolves this
+- No flavor/variant selection — defaults to `debug` variant
+- Compose compiler plugin outputs are not available without a build
 
 ### Kotlin Multiplatform (KMP)
 
