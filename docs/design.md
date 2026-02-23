@@ -41,6 +41,9 @@ lsp-kotlin-review/
 │   │   ├── extension.ts             # Entry point, LanguageClient setup
 │   │   ├── javaDetector.ts          # Find/validate Java runtime
 │   │   └── config.ts                # Extension settings
+│   ├── syntaxes/
+│   │   └── kotlin.tmLanguage.json   # TextMate grammar for syntax highlighting
+│   ├── language-configuration.json  # Bracket matching, comment toggling, folding
 │   ├── package.json                 # Extension manifest + contributes
 │   ├── tsconfig.json
 │   ├── esbuild.mjs                  # Bundle config
@@ -108,15 +111,17 @@ lsp-kotlin-review/
 ### 1. VS Code Client (`client/`)
 
 **Responsibilities:**
-- Detect Java runtime (settings → JAVA_HOME → JDK_HOME → PATH)
+- Detect Java runtime (settings → JAVA_HOME → JDK_HOME → `/usr/libexec/java_home` on macOS → PATH)
 - Validate Java version >= 17
 - Spawn server JAR as child process via stdio with default JVM flags
 - Register LanguageClient with document selectors for `kotlin`
+- Provide syntax highlighting via TextMate grammar
+- Provide language configuration (bracket matching, comment toggling, folding)
 - Surface settings: java path, server JVM args, trace level
 
 **Default JVM flags** (set in `extension.ts`):
 ```
--Xmx512m -XX:+UseG1GC -XX:+TieredCompilation -XX:TieredStopAtLevel=1
+-Xmx2g -XX:+UseG1GC
 ```
 
 **Key dependencies:**
@@ -126,7 +131,17 @@ lsp-kotlin-review/
 **package.json contributes:**
 ```json
 {
-  "languages": [{ "id": "kotlin", "extensions": [".kt", ".kts"] }],
+  "languages": [{
+    "id": "kotlin",
+    "aliases": ["Kotlin", "kotlin"],
+    "extensions": [".kt", ".kts"],
+    "configuration": "./language-configuration.json"
+  }],
+  "grammars": [{
+    "language": "kotlin",
+    "scopeName": "source.kotlin",
+    "path": "./syntaxes/kotlin.tmLanguage.json"
+  }],
   "configuration": {
     "kotlinReview.java.home": "Path to Java runtime (17+)",
     "kotlinReview.server.jvmArgs": "Additional JVM arguments",
@@ -171,8 +186,9 @@ lsp-kotlin-review/
 1. `initialize` → configure capabilities (all P0+P1), set workspace root
 2. `initialized` → detect build system (async), resolve ProjectModel, create AnalysisSession, wire providers, register file watchers for build files
 3. `textDocument/didOpen` → update file content, publish diagnostics (version-tracked)
-4. `textDocument/didChange` → update file content, debounced diagnostics (250ms)
-5. `textDocument/didClose` → clear diagnostics, remove version tracking
+4. `textDocument/didChange` → update file content in map, debounced diagnostics (250ms, runs on stale session)
+5. `textDocument/didSave` → rebuild analysis session from disk, re-publish diagnostics
+6. `textDocument/didClose` → clear diagnostics, remove version tracking
 6. `workspace/didChangeWatchedFiles` → if build file changed, rebuild session (re-resolve ProjectModel, dispose old facade, create new facade, rewire providers)
 7. `shutdown` → dispose analysis session, shut down debounce scheduler, cancel coroutine scope
 8. `exit` → terminate JVM
@@ -259,6 +275,7 @@ interface CompilerFacade {
     fun prepareRename(file: Path, line: Int, column: Int): RenameContext?
     fun computeRename(context: RenameContext, newName: String): List<FileEdit>
     fun updateFileContent(file: Path, content: String)
+    fun refreshAnalysis()  // Rebuild session from disk (called on didSave)
     fun dispose()
 }
 ```
@@ -299,9 +316,12 @@ class AnalysisApiCompilerFacade(
     // LRU cache for getFileSymbols results (128 entries, invalidated on updateFileContent)
     private val symbolCache = LinkedHashMap<Path, List<ResolvedSymbol>>(...)
 
-    // Lazy-initialized standalone Analysis API session
-    private val session by lazy {
-        buildStandaloneAnalysisAPISession {
+    // Mutable session — rebuilt from disk on didSave via refreshAnalysis()
+    @Volatile
+    private var _session: StandaloneAnalysisAPISession? = null
+
+    private fun buildSession(): StandaloneAnalysisAPISession {
+        return buildStandaloneAnalysisAPISession {
             buildKtModuleProvider {
                 // 1. Library modules (deduplicated classpath JARs)
                 // 2. JDK module (from java.home)
@@ -316,15 +336,21 @@ class AnalysisApiCompilerFacade(
     }
 
     override fun resolveAtPosition(file, line, column): ResolvedSymbol? {
-        // Find KtReferenceExpression at offset
-        // Get KtReference, call resolveToSymbols()
-        // Map KaSymbol -> ResolvedSymbol with try/catch
+        // 1. Try KtReferenceExpression: resolve via KtReference.resolveToSymbols()
+        //    - For source PSI: name from KtNamedDeclaration, signature from PSI text
+        //    - For compiled PSI (ClsElementImpl): synthetic signature via renderSyntheticSignature()
+        //      using classId, name, returnType from KaSymbol metadata
+        // 2. Try KtNamedDeclaration: return declaration info directly (for hovering over val/fun/class)
     }
 
     override fun getType(file, line, column): TypeInfo? {
-        // Find KtExpression at offset
-        // analyze(expr) { expr.expressionType }
-        // Map KaType -> TypeInfo
+        // For KtCallableDeclaration: decl.symbol.returnType (avoids Unit for declarations)
+        // For KtExpression: expr.expressionType
+    }
+
+    override fun refreshAnalysis() {
+        // Null old session, GC, then rebuild from disk
+        // Called on didSave to pick up saved file changes
     }
 
     override fun getFileSymbols(file): List<ResolvedSymbol> {
@@ -397,7 +423,7 @@ Each provider receives `CompilerFacade` injected via `KotlinTextDocumentService.
 
 | Constraint | Solution | Actual |
 |---|---|---|
-| VSIX size | No bundled JVM. Server JAR ~30-50 MB. Total VSIX < 60 MB | **44.88 MB VSIX** (49 MB shadow JAR) |
+| VSIX size | No bundled JVM. Server JAR ~85 MB (Analysis API + IntelliJ Platform). Total VSIX ~78 MB | **~78 MB VSIX** (85 MB shadow JAR) |
 | Activation | `onLanguage:kotlin` only, no startup penalty | Implemented |
 | JVM dependency | Require system Java 17+, detect via JAVA_HOME/PATH | Implemented (javaDetector.ts) |
 | Licensing | Kotlin compiler = Apache 2.0, LSP4J = EPL 2.0. Both permissive | Verified |
@@ -407,11 +433,11 @@ Each provider receives `CompilerFacade` injected via `KotlinTextDocumentService.
 ## Performance Design
 
 ### Startup Strategy
-- **Lazy compiler init**: `StandaloneAnalysisAPISession` created lazily (`by lazy`) on first facade method call
+- **Lazy compiler init**: `StandaloneAnalysisAPISession` created on first facade method call (mutable `@Volatile var`, rebuilt on save)
 - **Async initialization**: `initialized` handler runs build system resolution and session creation on `Dispatchers.Default` coroutine scope, returns immediately
-- **JVM flags for fast startup** (set by client):
+- **JVM flags** (set by client):
   ```
-  -Xmx512m -XX:+UseG1GC -XX:+TieredCompilation -XX:TieredStopAtLevel=1
+  -Xmx2g -XX:+UseG1GC
   ```
 
 ### Debouncing & Cancellation (Implemented)
@@ -477,10 +503,10 @@ Each provider receives `CompilerFacade` injected via `KotlinTextDocumentService.
 
 ## Build & Package Pipeline
 
-1. `cd server && ./gradlew shadowJar` → fat JAR (`server-all.jar`, ~49 MB)
+1. `cd server && ./gradlew shadowJar` → fat JAR (`server-all.jar`, ~85 MB)
 2. `cd client && npm install && npm run build` → esbuild bundle (`dist/extension.js`)
 3. `cp server/build/libs/server-all.jar client/server/` → embed JAR in extension
-4. `cd client && npx @vscode/vsce package` → produce `.vsix` (~44.88 MB)
+4. `cd client && npx @vscode/vsce package` → produce `.vsix` (~78 MB)
 
 Automated via `scripts/build.sh` (steps 1-3) and `scripts/package.sh` (all steps).
 
@@ -495,7 +521,7 @@ Automated via `scripts/build.sh` (steps 1-3) and `scripts/package.sh` (all steps
 - ~~Multi-module projects~~: **Resolved & Implemented** — ProjectModel supports multiple ModuleInfo entries. GradleProvider returns all modules. AnalysisApiCompilerFacade creates per-module source modules with shared library/JDK modules. Cross-module navigation works.
 - ~~Kotlin compiler version~~: **Resolved (ADR-15)** — Using Kotlin Analysis API 2.1.0. All `-for-ide` artifacts pinned with `isTransitive = false`. CompilerFacade abstraction (ADR-14) isolates version-specific breakage.
 - ~~Analysis API threading~~: **Resolved** — All `analyze {}` calls serialized through a single-threaded `ExecutorService`. The standalone session does not support concurrent `analyze {}` calls.
-- ~~Analysis API incremental updates~~: **Resolved** — The standalone session does not support incremental file updates. On build file changes, the entire session is rebuilt via `AnalysisSession.rebuild()`.
+- ~~Analysis API incremental updates~~: **Resolved (ADR-16)** — The standalone session's PSI/FIR trees are immutable. `document.setText()`, `replaceAllChildrenToChildrenOf()`, and raw tree operations all fail. On `didSave`, the entire session is rebuilt via `refreshAnalysis()`. Diagnostics update on save only.
 
 ## Compatibility
 

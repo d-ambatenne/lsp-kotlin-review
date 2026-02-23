@@ -52,8 +52,9 @@
 **Rationale**: Most review edits are body-only (fixing a bug, tweaking logic). Re-analyzing the whole project for a one-line change is unacceptable. File dependency graph in FileIndex makes propagation cheap.
 
 ## ADR-11: Performance — JVM Tuning
-**Decision**: `-Xmx512m -XX:+UseG1GC -XX:+TieredCompilation -XX:TieredStopAtLevel=1`
-**Rationale**: Review tool prioritizes startup speed over peak throughput. TieredStopAtLevel=1 skips C2 optimization for ~1-2s faster startup. G1GC provides low-latency pauses. 512 MB heap cap prevents runaway memory usage.
+**Decision**: `-Xmx2g -XX:+UseG1GC`
+**Rationale**: The K2 Analysis API session requires significant heap for FIR trees and PSI caches (~500-800 MB for a medium project). Session rebuild on save temporarily doubles memory before the old session is GC'd. 2 GB provides headroom. G1GC provides low-latency pauses.
+**Revised from**: Originally `-Xmx512m -XX:+TieredCompilation -XX:TieredStopAtLevel=1`. The 512 MB cap caused OOM during session rebuilds. TieredStopAtLevel=1 was removed because it hurts long-running server performance by preventing full JIT optimization.
 
 ## ADR-12: Pluggable Build System Integration
 **Decision**: Define a `BuildSystemProvider` SPI interface. All build systems produce a unified `ProjectModel` (source roots + classpath). Ship Gradle provider in v1; Maven, Bazel, Buck, Mill, Amper as future providers. Manual fallback always available.
@@ -104,3 +105,17 @@
 - `org.jetbrains.kotlin:kotlin-compiler-embeddable` — still needed as transitive dep for PSI/compiler infrastructure
 **Alternative rejected**: K1 BindingContext APIs (dead end, no Kotlin 2.+ future)
 **Alternative rejected**: Direct FIR tree access (too low-level, unstable internal representation)
+
+## ADR-16: Session Rebuild for Live Diagnostics
+**Decision**: Rebuild the entire standalone Analysis API session from disk on `didSave`. No incremental PSI/FIR updates.
+**Rationale**: The standalone Analysis API's PSI and FIR trees are immutable after session creation. Attempts to modify PSI at runtime all failed:
+- `document.setText()` is a no-op (documents are read-only in standalone mode)
+- `CompositeElement.replaceAllChildrenToChildrenOf()` fails (PomManager not initialized)
+- Raw tree operations (`rawRemove`/`rawAddChildren`) partially succeed then crash on writability checks, corrupting the PSI tree and causing cascading FIR/PSI mismatch errors
+The only reliable path is `_session = buildSession()` which re-reads all files from disk and builds a fresh FIR tree. The old session is nulled + GC'd before building the new one to avoid OOM.
+**Trade-off**: Diagnostics only update on save, not on every keystroke. Acceptable for a code review tool. Session rebuild takes ~2-5 seconds.
+
+## ADR-17: TextMate Grammar for Syntax Highlighting
+**Decision**: Use a TextMate grammar (`.tmLanguage.json`) for syntax highlighting instead of LSP semantic tokens.
+**Rationale**: TextMate grammars are client-side, regex-based, and instant — no server roundtrip required. They work even before the server initializes. Semantic tokens (LSP) would require server-side Analysis API integration and are explicitly deferred. The grammar covers keywords, comments, strings (including `${}` interpolation), numbers, annotations, declarations, operators, and Kotlin-specific syntax.
+**Alternative rejected**: LSP semantic tokens (requires server work, adds latency, deferred per scope.md)

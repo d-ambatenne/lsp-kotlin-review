@@ -2,7 +2,7 @@
 
 A lightweight Kotlin Language Server for VS Code, focused on **code review and small changes**.
 
-Unlike full-featured Kotlin IDEs, this extension provides just the language intelligence you need when reviewing pull requests or making quick edits -- fast startup, low memory, no bloat.
+Unlike full-featured Kotlin IDEs, this extension provides just the language intelligence you need when reviewing pull requests or making quick edits -- syntax highlighting, diagnostics, navigation, and hover out of the box.
 
 ## Installation
 
@@ -48,12 +48,17 @@ The Gradle Tooling API 8.12 is used for classpath resolution. Compatible with **
 
 ## Features
 
+### Editor
+
+- **Syntax Highlighting** -- full Kotlin grammar (keywords, strings with `${}` interpolation, annotations, generics, operators)
+- **Language Configuration** -- bracket matching, comment toggling (`Cmd+/`), auto-closing pairs, folding
+
 ### Core
 
-- **Diagnostics** -- syntax and semantic errors/warnings as you type
+- **Diagnostics** -- syntax and semantic errors/warnings, updated on save
 - **Go to Definition** -- jump to where a symbol is declared
 - **Find References** -- find all usages of a symbol across the project
-- **Hover** -- type information and KDoc on mouse-over
+- **Hover** -- type information, signatures (including library types), and KDoc on mouse-over
 - **Document Symbols** -- outline view of classes, functions, and properties
 
 ### Enhanced
@@ -82,7 +87,7 @@ Language Server (Kotlin/JVM)
 
 - **Compiler backend**: Kotlin Analysis API with K2/FIR in standalone mode -- no IntelliJ dependency
 - **Build system**: Pluggable SPI. Ships with Gradle Tooling API provider; Maven, Bazel, and others planned
-- **Performance**: Analysis-phase only (no codegen), single-writer/multi-reader concurrency, incremental invalidation
+- **Performance**: Analysis-phase only (no codegen), single-threaded analysis, session rebuild on save
 
 See [docs/design.md](docs/design.md) for the full architecture, [docs/decisions.md](docs/decisions.md) for ADRs, and [docs/scope.md](docs/scope.md) for the feature roadmap.
 
@@ -99,6 +104,7 @@ See [docs/design.md](docs/design.md) for the full architecture, [docs/decisions.
 ```
 lsp-kotlin-review/
 +-- client/          # VS Code extension (TypeScript, vscode-languageclient)
+|   +-- syntaxes/    # TextMate grammar for syntax highlighting
 +-- server/          # Language server (Kotlin, LSP4J, Analysis API)
 +-- docs/            # Architecture, decisions, scope
 +-- scripts/         # Build and packaging
@@ -132,7 +138,7 @@ The extension requires Java 17 or later. If the server fails to start:
 
 Check the Output panel in VS Code (select "Kotlin Review" from the dropdown). Common causes:
 
-- **Insufficient memory**: add `-Xmx2g` to `kotlinReview.server.jvmArgs`
+- **Insufficient memory**: the default heap is 2 GB. For very large projects, increase via `kotlinReview.server.jvmArgs` (e.g. `-Xmx4g`)
 - **Incompatible Java version**: ensure Java 17+
 
 ### No diagnostics / features not working
