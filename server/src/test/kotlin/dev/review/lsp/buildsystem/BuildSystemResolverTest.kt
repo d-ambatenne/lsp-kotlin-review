@@ -27,7 +27,7 @@ class BuildSystemResolverTest {
             override val id = "fake"
             override val markerFiles = listOf("build.fake")
             override val priority = 10
-            override suspend fun resolve(workspaceRoot: Path) = ProjectModel(emptyList())
+            override suspend fun resolve(workspaceRoot: Path, variant: String) = ProjectModel(emptyList())
             override suspend fun resolveModule(workspaceRoot: Path, moduleName: String) =
                 ModuleInfo(moduleName, emptyList(), emptyList(), emptyList(), emptyList(), null, null)
         }
@@ -46,7 +46,7 @@ class BuildSystemResolverTest {
             override val id = "fake"
             override val markerFiles = listOf("build.fake")
             override val priority = 10
-            override suspend fun resolve(workspaceRoot: Path) = ProjectModel(emptyList())
+            override suspend fun resolve(workspaceRoot: Path, variant: String) = ProjectModel(emptyList())
             override suspend fun resolveModule(workspaceRoot: Path, moduleName: String) =
                 ModuleInfo(moduleName, emptyList(), emptyList(), emptyList(), emptyList(), null, null)
         }
@@ -66,7 +66,7 @@ class BuildSystemResolverTest {
             override val id = "low"
             override val markerFiles = listOf("marker.txt")
             override val priority = 1
-            override suspend fun resolve(workspaceRoot: Path) = ProjectModel(emptyList())
+            override suspend fun resolve(workspaceRoot: Path, variant: String) = ProjectModel(emptyList())
             override suspend fun resolveModule(workspaceRoot: Path, moduleName: String) =
                 ModuleInfo(moduleName, emptyList(), emptyList(), emptyList(), emptyList(), null, null)
         }
@@ -74,7 +74,7 @@ class BuildSystemResolverTest {
             override val id = "high"
             override val markerFiles = listOf("marker.txt")
             override val priority = 10
-            override suspend fun resolve(workspaceRoot: Path) = ProjectModel(emptyList())
+            override suspend fun resolve(workspaceRoot: Path, variant: String) = ProjectModel(emptyList())
             override suspend fun resolveModule(workspaceRoot: Path, moduleName: String) =
                 ModuleInfo(moduleName, emptyList(), emptyList(), emptyList(), emptyList(), null, null)
         }

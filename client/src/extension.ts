@@ -1,14 +1,18 @@
 import * as vscode from "vscode";
 import * as path from "path";
+import * as cp from "child_process";
 import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
 } from "vscode-languageclient/node";
 import { findJava } from "./javaDetector";
-import { getServerJvmArgs, getTraceServer } from "./config";
+import { getServerJvmArgs, getTraceServer, getBuildVariant, getAutoGenerate } from "./config";
 
 let client: LanguageClient | undefined;
+let androidStatusBar: vscode.StatusBarItem | undefined;
+let generateTimer: ReturnType<typeof setTimeout> | undefined;
+let generating = false;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const outputChannel = vscode.window.createOutputChannel("Kotlin Review");
@@ -46,7 +50,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ],
     outputChannel,
     traceOutputChannel: outputChannel,
-    initializationOptions: {},
+    initializationOptions: {
+      buildVariant: getBuildVariant(),
+    },
   };
 
   client = new LanguageClient(
@@ -64,16 +70,52 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
   }
 
-  // Register command for generating Android sources from code action
+  // --- Android status bar ---
+  androidStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
+  androidStatusBar.command = "kotlinReview.selectBuildVariant";
+  androidStatusBar.tooltip = "Click to change Android build variant";
+  updateStatusBar();
+  androidStatusBar.show();
+  context.subscriptions.push(androidStatusBar);
+
+  // --- Commands ---
+
+  // Generate sources (from code action or manual trigger)
   context.subscriptions.push(
     vscode.commands.registerCommand("kotlinReview.generateSources", (projectDir?: string) => {
-      const terminal = vscode.window.createTerminal("Kotlin Review: Generate Sources");
-      if (projectDir) {
-        terminal.sendText(`cd "${projectDir}" && ./gradlew generateDebugResources generateDebugBuildConfig --continue; echo 'Done. Reload window to pick up generated sources.'`);
-      } else {
-        terminal.sendText("./gradlew generateDebugResources generateDebugBuildConfig --continue; echo 'Done. Reload window to pick up generated sources.'");
+      runCodeGeneration(projectDir || getWorkspaceRoot(), outputChannel);
+    })
+  );
+
+  // Select build variant
+  context.subscriptions.push(
+    vscode.commands.registerCommand("kotlinReview.selectBuildVariant", async () => {
+      const variant = await vscode.window.showInputBox({
+        prompt: "Enter Android build variant name",
+        value: getBuildVariant(),
+        placeHolder: "debug, release, stagingDebug, etc.",
+      });
+      if (variant && variant !== getBuildVariant()) {
+        await vscode.workspace.getConfiguration("kotlinReview").update(
+          "android.buildVariant", variant, vscode.ConfigurationTarget.Workspace
+        );
+        updateStatusBar();
+        outputChannel.appendLine(`Build variant changed to: ${variant}`);
       }
-      terminal.show();
+    })
+  );
+
+  // --- Auto-generate on save ---
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((doc) => {
+      if (!getAutoGenerate()) return;
+      if (doc.languageId !== "kotlin") return;
+
+      // Debounce: reset timer on each save, fire after 3 seconds of inactivity
+      if (generateTimer) clearTimeout(generateTimer);
+      generateTimer = setTimeout(() => {
+        runCodeGeneration(getWorkspaceRoot(), outputChannel);
+      }, 3000);
     })
   );
 
@@ -81,7 +123,87 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   outputChannel.appendLine("Kotlin Review LSP client started");
 }
 
+function updateStatusBar(): void {
+  if (!androidStatusBar) return;
+  const variant = getBuildVariant();
+  if (generating) {
+    androidStatusBar.text = "$(sync~spin) Generating...";
+  } else {
+    androidStatusBar.text = `$(gear) Android: ${variant}`;
+  }
+}
+
+function getWorkspaceRoot(): string {
+  const folders = vscode.workspace.workspaceFolders;
+  return folders?.[0]?.uri.fsPath || "";
+}
+
+function runCodeGeneration(projectDir: string, outputChannel: vscode.OutputChannel): void {
+  if (generating) return; // already running
+
+  const variant = getBuildVariant();
+  const cap = variant.charAt(0).toUpperCase() + variant.slice(1);
+  const tasks = [`generate${cap}Resources`, `generate${cap}BuildConfig`, "--continue", "-q"];
+
+  generating = true;
+  updateStatusBar();
+
+  vscode.window.withProgress({
+    location: vscode.ProgressLocation.Window,
+    title: `Generating Android sources (${variant})...`,
+  }, () => {
+    return new Promise<void>((resolve) => {
+      const cwd = projectDir || getWorkspaceRoot();
+      if (!cwd) {
+        generating = false;
+        updateStatusBar();
+        resolve();
+        return;
+      }
+
+      outputChannel.appendLine(`[Android] Running: ./gradlew ${tasks.join(" ")} in ${cwd}`);
+
+      const proc = cp.spawn("./gradlew", tasks, {
+        cwd,
+        shell: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      let stderr = "";
+      proc.stdout?.on("data", (data: Buffer) => {
+        const text = data.toString().trim();
+        if (text) outputChannel.appendLine(`[Android] ${text}`);
+      });
+      proc.stderr?.on("data", (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      proc.on("close", (code) => {
+        generating = false;
+        updateStatusBar();
+        if (code === 0) {
+          outputChannel.appendLine("[Android] Code generation completed successfully");
+        } else {
+          outputChannel.appendLine(`[Android] Code generation finished with exit code ${code}`);
+          if (stderr.trim()) {
+            outputChannel.appendLine(`[Android] ${stderr.trim().split("\n").slice(0, 5).join("\n")}`);
+          }
+        }
+        resolve();
+      });
+
+      proc.on("error", (err) => {
+        generating = false;
+        updateStatusBar();
+        outputChannel.appendLine(`[Android] Failed to run Gradle: ${err.message}`);
+        resolve();
+      });
+    });
+  });
+}
+
 export async function deactivate(): Promise<void> {
+  if (generateTimer) clearTimeout(generateTimer);
   if (client) {
     await client.stop();
     client = undefined;

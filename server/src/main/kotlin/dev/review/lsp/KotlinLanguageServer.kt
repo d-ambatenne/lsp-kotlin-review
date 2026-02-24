@@ -19,10 +19,18 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
     private var workspaceRoot: String? = null
     private var rootPath: Path? = null
     private var analysisSession: AnalysisSession? = null
+    private var buildVariant: String = "debug"
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     override fun initialize(params: InitializeParams): CompletableFuture<InitializeResult> {
         workspaceRoot = params.rootUri ?: params.rootPath
+        // Read build variant from client initialization options
+        try {
+            val initOptions = params.initializationOptions
+            if (initOptions is com.google.gson.JsonObject) {
+                initOptions.get("buildVariant")?.asString?.let { buildVariant = it }
+            }
+        } catch (_: Exception) { /* use default */ }
         val capabilities = ServerCapabilities().apply {
             setTextDocumentSync(TextDocumentSyncKind.Full)
             definitionProvider = Either.forLeft(true)
@@ -48,9 +56,9 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
                 val rp = Paths.get(java.net.URI.create(root))
                 rootPath = rp
 
-                log(MessageType.Info, "Resolving build system...")
+                log(MessageType.Info, "Resolving build system (variant: $buildVariant)...")
                 val resolver = BuildSystemResolver()
-                val (provider, model) = resolver.resolve(rp)
+                val (provider, model) = resolver.resolve(rp, buildVariant)
 
                 log(MessageType.Info, "Detected build system: ${provider.id}")
 
@@ -61,8 +69,10 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
                 val publisher = DiagnosticsPublisher(session.facade, c)
                 textDocumentService.setAnalysis(session.facade, publisher, model.projectDir)
 
-                // Wire up workspace service for build file changes
+                // Wire up workspace service callbacks
                 workspaceService.onBuildFileChanged = { rebuildSession() }
+                workspaceService.onGeneratedSourcesChanged = { rebuildSession() }
+                workspaceService.onConfigurationChanged = { rebuildSession() }
 
                 log(MessageType.Info, "Analysis session ready (${model.modules.size} module(s))")
 
@@ -83,7 +93,10 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
             FileSystemWatcher(Either.forLeft("**/build.gradle.kts"), WatchKind.Create + WatchKind.Change + WatchKind.Delete),
             FileSystemWatcher(Either.forLeft("**/build.gradle"), WatchKind.Create + WatchKind.Change + WatchKind.Delete),
             FileSystemWatcher(Either.forLeft("**/settings.gradle.kts"), WatchKind.Create + WatchKind.Change + WatchKind.Delete),
-            FileSystemWatcher(Either.forLeft("**/settings.gradle"), WatchKind.Create + WatchKind.Change + WatchKind.Delete)
+            FileSystemWatcher(Either.forLeft("**/settings.gradle"), WatchKind.Create + WatchKind.Change + WatchKind.Delete),
+            // Watch generated source files for auto-rebuild when Gradle generates them
+            FileSystemWatcher(Either.forLeft("**/build/generated/**/*.kt"), WatchKind.Create + WatchKind.Change + WatchKind.Delete),
+            FileSystemWatcher(Either.forLeft("**/build/generated/**/*.java"), WatchKind.Create + WatchKind.Change + WatchKind.Delete)
         )
         val registration = Registration(
             "build-file-watcher",
@@ -108,9 +121,10 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
         }
 
         if (anyMissingGenerated) {
+            val cap = model.variant.replaceFirstChar { it.uppercase() }
             c.showMessage(MessageParams(
                 MessageType.Info,
-                "Android project detected. Run ./gradlew generateDebugResources generateDebugBuildConfig --continue for R class and BuildConfig support."
+                "Android project detected. Run ./gradlew generate${cap}Resources generate${cap}BuildConfig --continue for R class and BuildConfig support."
             ))
         }
     }
@@ -119,9 +133,9 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
         val rp = rootPath ?: return
         scope.launch {
             try {
-                log(MessageType.Info, "Build file changed, rebuilding analysis session...")
+                log(MessageType.Info, "Rebuilding analysis session (variant: $buildVariant)...")
                 val resolver = BuildSystemResolver()
-                val (provider, model) = resolver.resolve(rp)
+                val (provider, model) = resolver.resolve(rp, buildVariant)
 
                 log(MessageType.Info, "Rebuilt with build system: ${provider.id}")
 

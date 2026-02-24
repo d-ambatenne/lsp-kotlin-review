@@ -2,7 +2,7 @@
   "name": "kotlin-review",
   "displayName": "Kotlin Review",
   "description": "Kotlin language support for code review and small changes",
-  "version": "0.49.0",
+  "version": "0.57.0",
   "publisher": "kotlin-review",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -56,6 +56,10 @@
       {
         "command": "kotlinReview.generateSources",
         "title": "Kotlin Review: Run Gradle Code Generation"
+      },
+      {
+        "command": "kotlinReview.selectBuildVariant",
+        "title": "Kotlin Review: Select Android Build Variant"
       }
     ],
     "configuration": {
@@ -80,6 +84,16 @@
           ],
           "default": "off",
           "description": "Trace communication between VS Code and the language server."
+        },
+        "kotlinReview.android.buildVariant": {
+          "type": "string",
+          "default": "debug",
+          "description": "Android build variant for generated sources and classpath resolution (e.g., debug, release, stagingDebug)."
+        },
+        "kotlinReview.android.autoGenerate": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically run Gradle code generation after saving Kotlin files in Android projects."
         }
       }
     }

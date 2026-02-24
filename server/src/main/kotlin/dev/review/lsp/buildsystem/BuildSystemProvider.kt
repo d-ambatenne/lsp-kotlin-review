@@ -7,6 +7,6 @@ interface BuildSystemProvider {
     val markerFiles: List<String>
     val priority: Int
 
-    suspend fun resolve(workspaceRoot: Path): ProjectModel
+    suspend fun resolve(workspaceRoot: Path, variant: String = "debug"): ProjectModel
     suspend fun resolveModule(workspaceRoot: Path, moduleName: String): ModuleInfo
 }

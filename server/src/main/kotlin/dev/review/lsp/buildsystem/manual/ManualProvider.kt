@@ -11,7 +11,7 @@ class ManualProvider : BuildSystemProvider {
     override val markerFiles = emptyList<String>()
     override val priority = 0
 
-    override suspend fun resolve(workspaceRoot: Path): ProjectModel {
+    override suspend fun resolve(workspaceRoot: Path, variant: String): ProjectModel {
         val sourceRoots = SOURCE_DIRS
             .map { workspaceRoot.resolve(it) }
             .filter { Files.isDirectory(it) }

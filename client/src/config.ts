@@ -14,3 +14,11 @@ export function getServerJvmArgs(): string[] {
 export function getTraceServer(): string {
   return vscode.workspace.getConfiguration(SECTION).get<string>("trace.server", "off");
 }
+
+export function getBuildVariant(): string {
+  return vscode.workspace.getConfiguration(SECTION).get<string>("android.buildVariant", "debug");
+}
+
+export function getAutoGenerate(): boolean {
+  return vscode.workspace.getConfiguration(SECTION).get<boolean>("android.autoGenerate", false);
+}

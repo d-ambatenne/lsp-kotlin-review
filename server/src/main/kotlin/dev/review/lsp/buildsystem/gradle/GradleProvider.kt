@@ -14,7 +14,7 @@ class GradleProvider : BuildSystemProvider {
     override val markerFiles = listOf("build.gradle.kts", "build.gradle", "settings.gradle.kts", "settings.gradle")
     override val priority = 10
 
-    override suspend fun resolve(workspaceRoot: Path): ProjectModel {
+    override suspend fun resolve(workspaceRoot: Path, variant: String): ProjectModel {
         val connector = GradleConnector.newConnector()
             .forProjectDirectory(workspaceRoot.toFile())
 
@@ -34,7 +34,7 @@ class GradleProvider : BuildSystemProvider {
                 .get()
             var modules = ideaProject.modules.mapNotNull { ideaModule ->
                 try {
-                    resolveModule(ideaModule)
+                    resolveModule(ideaModule, variant)
                 } catch (e: Exception) {
                     System.err.println("Skipping module '${ideaModule.name}': ${e.message}")
                     null
@@ -42,31 +42,46 @@ class GradleProvider : BuildSystemProvider {
             }
 
             // IdeaProject/EclipseProject don't report dependencies for Android (AGP) modules.
-            // Use a Gradle init script to resolve debugCompileClasspath directly.
+            // Use a Gradle init script to resolve classpath directly.
+            // Run for any project with Android modules OR modules with empty classpath,
+            // and merge results (not just replace) to fill gaps in partial IdeaProject data.
+            val hasAndroid = modules.any { it.isAndroid }
             val anyEmptyClasspath = modules.any { it.classpath.isEmpty() }
-            if (anyEmptyClasspath) {
+            for (m in modules) {
+                System.err.println("[gradle] module '${m.name}': android=${m.isAndroid}, classpath=${m.classpath.size} entries, sources=${m.sourceRoots.size}")
+            }
+            System.err.println("[gradle] hasAndroid=$hasAndroid, anyEmptyClasspath=$anyEmptyClasspath")
+            if (hasAndroid || anyEmptyClasspath) {
                 try {
-                    val resolvedCp = resolveClasspathViaInitScript(connection, workspaceRoot)
+                    System.err.println("[gradle] Running init script for classpath resolution (variant=$variant)...")
+                    val resolvedCp = resolveClasspathViaInitScript(connection, workspaceRoot, variant)
+                    System.err.println("[gradle] Init script resolved ${resolvedCp.size} modules: ${resolvedCp.map { "${it.key}=${it.value.size}" }}")
                     modules = modules.map { module ->
-                        if (module.classpath.isEmpty()) {
-                            val cp = resolvedCp[module.name]
-                            if (cp != null && cp.isNotEmpty()) {
-                                module.copy(classpath = cp)
+                        val cp = resolvedCp[module.name]
+                        if (cp != null && cp.isNotEmpty()) {
+                            val existingPaths = module.classpath.map { it.normalize() }.toSet()
+                            val newEntries = cp.filter { it.normalize() !in existingPaths }
+                            System.err.println("[gradle] module '${module.name}': +${newEntries.size} new classpath entries from init script")
+                            if (newEntries.isNotEmpty()) {
+                                module.copy(classpath = module.classpath + newEntries)
                             } else module
                         } else module
                     }
                 } catch (e: Exception) {
-                    System.err.println("Init script classpath resolution failed: ${e.message}")
+                    System.err.println("[gradle] Init script classpath resolution failed: ${e.message}")
+                    e.printStackTrace(System.err)
                 }
+            } else {
+                System.err.println("[gradle] Skipping init script (no Android modules and no empty classpath)")
             }
 
-            ProjectModel(modules = modules)
+            ProjectModel(modules = modules, variant = variant)
         } finally {
             connection.close()
         }
     }
 
-    private fun resolveModule(ideaModule: org.gradle.tooling.model.idea.IdeaModule): ModuleInfo {
+    private fun resolveModule(ideaModule: org.gradle.tooling.model.idea.IdeaModule, variant: String): ModuleInfo {
         val sourceRoots = mutableListOf<Path>()
         val testSourceRoots = mutableListOf<Path>()
         val classpath = mutableListOf<Path>()
@@ -121,7 +136,7 @@ class GradleProvider : BuildSystemProvider {
             }
 
             // Add generated source directories that exist on disk (from previous build)
-            addGeneratedSources(moduleDir, sourceRoots)
+            addGeneratedSources(moduleDir, sourceRoots, variant)
         }
 
         return ModuleInfo(
@@ -138,44 +153,43 @@ class GradleProvider : BuildSystemProvider {
 
     private fun resolveClasspathViaInitScript(
         connection: org.gradle.tooling.ProjectConnection,
-        workspaceRoot: Path
+        workspaceRoot: Path,
+        variant: String = "debug"
     ): Map<String, List<Path>> {
-        // Write a temporary Gradle init script that resolves debugCompileClasspath
+        // Write a temporary Gradle init script that resolves the variant's compile classpath
         val initScript = Files.createTempFile("lsp-classpath-", ".gradle")
+        val variantCp = "${variant}CompileClasspath"
         try {
             Files.writeString(initScript, """
                 allprojects {
                     task lspResolveClasspath {
                         doLast {
-                            def configs = ["debugCompileClasspath", "releaseCompileClasspath", "compileClasspath"]
+                            // List all resolvable compile-related configurations
+                            def compileConfigs = configurations.names.findAll {
+                                it.toLowerCase().contains("compileclasspath")
+                            }
+                            println "LSPDBG:" + project.name + ":available=" + compileConfigs.join(",")
+
+                            def configs = ["$variantCp", "compileClasspath"]
+                            // Also try any available compile classpath config as last resort
+                            compileConfigs.each { if (!configs.contains(it)) configs.add(it) }
+
                             for (configName in configs) {
                                 def cp = configurations.findByName(configName)
-                                if (cp != null) {
-                                    try {
-                                        // Try lenient resolution first
-                                        cp.resolvedConfiguration.lenientConfiguration.files.each { file ->
-                                            println "LSPCP:" + project.name + ":" + file.absolutePath
-                                        }
-                                        break
-                                    } catch (e) {
-                                        // resolvedConfiguration may throw; try incoming.files as fallback
-                                        try {
-                                            cp.incoming.files.each { file ->
-                                                println "LSPCP:" + project.name + ":" + file.absolutePath
-                                            }
-                                            break
-                                        } catch (e2) {
-                                            // Last resort: iterate artifacts individually
-                                            try {
-                                                cp.incoming.artifacts.artifacts.each { art ->
-                                                    println "LSPCP:" + project.name + ":" + art.file.absolutePath
-                                                }
-                                                break
-                                            } catch (e3) {
-                                                println "LSPERR:" + project.name + ":" + configName + ":" + e3.message?.take(80)
-                                            }
-                                        }
+                                if (cp == null) continue
+                                if (!cp.canBeResolved) {
+                                    println "LSPDBG:" + project.name + ":" + configName + "=not-resolvable"
+                                    continue
+                                }
+                                try {
+                                    // Use artifactView with lenient=true — this is the proper
+                                    // Gradle API that skips unresolvable artifacts gracefully
+                                    cp.incoming.artifactView { lenient = true }.files.each { file ->
+                                        println "LSPCP:" + project.name + ":" + file.absolutePath
                                     }
+                                    break
+                                } catch (e) {
+                                    println "LSPERR:" + project.name + ":" + configName + ":" + e.message?.take(200)
                                 }
                             }
                         }
@@ -204,8 +218,8 @@ class GradleProvider : BuildSystemProvider {
                             }
                         }
                     }
-                    line.startsWith("LSPERR:") -> {} // dependency resolution error, expected for some Android modules
-                    line.startsWith("LSPAVAIL:") -> {}
+                    line.startsWith("LSPERR:") -> System.err.println("[gradle] $line")
+                    line.startsWith("LSPDBG:") -> System.err.println("[gradle] $line")
                 }
             }
             return result
@@ -301,21 +315,25 @@ class GradleProvider : BuildSystemProvider {
         }
     }
 
-    private fun addGeneratedSources(moduleDir: Path, sourceRoots: MutableList<Path>) {
-        // Common generated source directories for Android debug variant
+    private fun addGeneratedSources(moduleDir: Path, sourceRoots: MutableList<Path>, variant: String) {
+        // Common generated source directories for the selected Android build variant.
+        // Some tools use build/generated/source/X/variant, others use build/generated/X/variant/kotlin.
         val generatedDirs = listOf(
-            "build/generated/source/r/debug",
-            "build/generated/source/buildConfig/debug",
-            "build/generated/source/dataBinding/debug",
-            "build/generated/data_binding_base_class_source_out/debug",
-            "build/generated/source/kapt/debug",
-            "build/generated/source/ksp/debug",
-            "build/generated/ap_generated_sources/debug/out"
+            "build/generated/source/r/$variant",
+            "build/generated/source/buildConfig/$variant",
+            "build/generated/source/dataBinding/$variant",
+            "build/generated/data_binding_base_class_source_out/$variant",
+            "build/generated/source/kapt/$variant",
+            "build/generated/source/ksp/$variant",
+            "build/generated/ksp/$variant/kotlin",          // KSP alternate layout
+            "build/generated/ksp/$variant/java",            // KSP Java output
+            "build/generated/ap_generated_sources/$variant/out"
         )
 
+        val existingPaths = sourceRoots.map { it.normalize() }.toSet()
         for (dir in generatedDirs) {
             val path = moduleDir.resolve(dir)
-            if (Files.isDirectory(path)) {
+            if (Files.isDirectory(path) && path.normalize() !in existingPaths) {
                 sourceRoots.add(path)
             }
         }

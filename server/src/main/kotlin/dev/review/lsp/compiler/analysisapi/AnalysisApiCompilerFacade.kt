@@ -72,9 +72,38 @@ class AnalysisApiCompilerFacade(
             return s
         }
 
+    /** Extract classes.jar from an AAR file to a temp directory. */
+    private fun extractClassesFromAar(aar: Path): Path? {
+        return try {
+            val tempDir = java.nio.file.Files.createTempDirectory("lsp-aar-")
+            val classesJar = tempDir.resolve("classes.jar")
+            java.util.zip.ZipFile(aar.toFile()).use { zip ->
+                val entry = zip.getEntry("classes.jar") ?: return null
+                zip.getInputStream(entry).use { input ->
+                    java.nio.file.Files.copy(input, classesJar, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                }
+            }
+            classesJar
+        } catch (e: Exception) {
+            System.err.println("[session] Failed to extract classes.jar from ${aar.fileName}: ${e.message}")
+            null
+        }
+    }
+
     private fun buildSession(): org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession {
         // Deduplicate classpath jars across all modules
-        val allClasspath = projectModel.modules.flatMap { it.classpath }.distinct()
+        val rawClasspath = projectModel.modules.flatMap { it.classpath }.distinct()
+
+        // Extract classes.jar from AAR files (Android Archive bundles)
+        val allClasspath = rawClasspath.flatMap { entry ->
+            if (entry.toString().endsWith(".aar")) {
+                val extracted = extractClassesFromAar(entry)
+                if (extracted != null) listOf(extracted) else emptyList()
+            } else {
+                listOf(entry)
+            }
+        }
+        System.err.println("[session] Classpath: ${rawClasspath.size} entries (${rawClasspath.count { it.toString().endsWith(".aar") }} AARs extracted), ${allClasspath.size} JARs total")
 
         return buildStandaloneAnalysisAPISession {
             buildKtModuleProvider {

@@ -51,17 +51,17 @@ class BuildSystemResolver(
             .maxByOrNull { it.priority }
     }
 
-    suspend fun resolve(workspaceRoot: Path): Pair<BuildSystemProvider, ProjectModel> {
+    suspend fun resolve(workspaceRoot: Path, variant: String = "debug"): Pair<BuildSystemProvider, ProjectModel> {
         val (provider, projectDir) = detect(workspaceRoot)
         return try {
-            val model = provider.resolve(projectDir)
-            provider to model.copy(projectDir = projectDir)
+            val model = provider.resolve(projectDir, variant)
+            provider to model.copy(projectDir = projectDir, variant = variant)
         } catch (e: Exception) {
             if (provider === manualProvider) throw e
             // Gradle (or other provider) failed -- fall back to ManualProvider
             System.err.println("Build system '${provider.id}' failed: ${e.message}, falling back to manual")
-            val model = manualProvider.resolve(projectDir)
-            manualProvider to model.copy(projectDir = projectDir)
+            val model = manualProvider.resolve(projectDir, variant)
+            manualProvider to model.copy(projectDir = projectDir, variant = variant)
         }
     }
 }

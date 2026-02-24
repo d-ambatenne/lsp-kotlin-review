@@ -4,7 +4,8 @@ import java.nio.file.Path
 
 data class ProjectModel(
     val modules: List<ModuleInfo>,
-    val projectDir: Path? = null
+    val projectDir: Path? = null,
+    val variant: String = "debug"
 )
 
 data class ModuleInfo(
