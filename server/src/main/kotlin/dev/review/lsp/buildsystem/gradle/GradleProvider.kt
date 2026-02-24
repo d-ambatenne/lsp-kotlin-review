@@ -137,6 +137,10 @@ class GradleProvider : BuildSystemProvider {
 
             // Add generated source directories that exist on disk (from previous build)
             addGeneratedSources(moduleDir, sourceRoots, variant)
+
+            // Modern AGP compiles R class directly to a JAR (no R.java source).
+            // Add R.jar to classpath if it exists.
+            addGeneratedClasspathJars(moduleDir, classpath, variant)
         }
 
         return ModuleInfo(
@@ -335,6 +339,21 @@ class GradleProvider : BuildSystemProvider {
             val path = moduleDir.resolve(dir)
             if (Files.isDirectory(path) && path.normalize() !in existingPaths) {
                 sourceRoots.add(path)
+            }
+        }
+    }
+
+    private fun addGeneratedClasspathJars(moduleDir: Path, classpath: MutableList<Path>, variant: String) {
+        // Modern AGP (7+/8+) compiles R class directly to R.jar instead of generating R.java
+        val jarPaths = listOf(
+            "build/intermediates/compile_and_runtime_not_namespaced_r_class_jar/$variant/processDebugResources/R.jar",
+            "build/intermediates/compile_and_runtime_not_namespaced_r_class_jar/$variant/process${variant.replaceFirstChar { it.uppercase() }}Resources/R.jar"
+        )
+        val existingPaths = classpath.map { it.normalize() }.toSet()
+        for (jarPath in jarPaths) {
+            val path = moduleDir.resolve(jarPath)
+            if (Files.exists(path) && path.normalize() !in existingPaths) {
+                classpath.add(path)
             }
         }
     }
