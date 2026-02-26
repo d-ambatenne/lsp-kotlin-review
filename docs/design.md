@@ -87,8 +87,8 @@ lsp-kotlin-review/
 │   │       └── util/
 │   │           ├── PositionConverter.kt  # LSP <-> compiler positions
 │   │           └── UriUtil.kt
-│   ├── src/test/kotlin/              # 48 tests across 15 files
-│   ├── src/test/resources/           # Test fixtures (single-module, multi-module, no-build-system)
+│   ├── src/test/kotlin/              # Tests (unit, integration, e2e)
+│   ├── src/test/resources/           # Test fixtures (single-module, multi-module, no-build-system, android-module)
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
 ├── scripts/
@@ -249,7 +249,7 @@ Detection logic:
 
 | Provider | Marker Files | Strategy | Status |
 |---|---|---|---|
-| `GradleProvider` | `build.gradle.kts`, `build.gradle`, `settings.gradle.kts`, `settings.gradle` | Gradle Tooling API — query `IdeaProject` model for source sets + classpath. Android enrichment: detect Android modules, add `android.jar`, scan `build/generated/` for generated sources, resolve classpath via init script when `IdeaProject` returns empty (ADR-18). Conventional source root fallback for Android modules. Per-module error handling. | **Implemented** |
+| `GradleProvider` | `build.gradle.kts`, `build.gradle`, `settings.gradle.kts`, `settings.gradle` | Gradle Tooling API — query `IdeaProject` model for source sets + classpath. Android enrichment: detect Android modules, add `android.jar`, scan `build/generated/` for generated sources, resolve classpath via init script when `IdeaProject` returns empty (ADR-18). Init script also resolves test classpaths (`debugAndroidTestCompileClasspath`, `debugUnitTestCompileClasspath`) for test source set support (ADR-22). Conventional source root fallback for Android modules. Per-module error handling. | **Implemented** |
 | `MavenProvider` | `pom.xml` | Shell out to `mvn dependency:build-classpath` + parse POM for source dirs | **future** |
 | `BazelProvider` | `WORKSPACE`, `WORKSPACE.bazel`, `MODULE.bazel` | Shell out to `bazel query` + `bazel cquery` for deps | **future** |
 | `ManualProvider` | *(fallback)* | Scan for `src/main/kotlin`, `src/main/java`, `src/test/kotlin`, `src/kotlin`, `src`. No classpath. | **Implemented** |
@@ -325,9 +325,9 @@ class AnalysisApiCompilerFacade(
     private fun buildSession(): StandaloneAnalysisAPISession {
         return buildStandaloneAnalysisAPISession {
             buildKtModuleProvider {
-                // 1. Library modules (deduplicated classpath JARs from all modules)
+                // 1. Library modules (deduplicated classpath + testClasspath JARs from all modules)
                 // 2. JDK module (from java.home)
-                // 3. Single merged source module (all modules' source roots — ADR-19)
+                // 3. Single merged source module (all modules' sourceRoots + testSourceRoots — ADR-19, ADR-22)
             }
         }
     }
@@ -338,11 +338,15 @@ class AnalysisApiCompilerFacade(
     }
 
     override fun resolveAtPosition(file, line, column): ResolvedSymbol? {
+        // 0. Annotation entries: detect KtAnnotationEntry by walking PSI up to 6 levels (ADR-23)
+        //    Resolve typeReference.type → KaClassSymbol → "annotation class <FQN>"
         // 1. Try KtReferenceExpression: resolve via KtReference.resolveToSymbols()
-        //    - For source PSI: name from KtNamedDeclaration, signature from PSI text
+        //    - For source PSI: name from KtNamedDeclaration, signature from extractSignatureLine()
+        //      (skips leading annotation lines including multi-line annotations)
         //    - For compiled PSI (ClsElementImpl): synthetic signature via renderSyntheticSignature()
         //      using classId, name, returnType from KaSymbol metadata
         // 2. Try KtNamedDeclaration: return declaration info directly (for hovering over val/fun/class)
+        //    Signature via extractSignatureLine() which uses declaration keyword matching
     }
 
     override fun getType(file, line, column): TypeInfo? {
@@ -528,5 +532,5 @@ Automated via `scripts/build.sh` (steps 1-3) and `scripts/package.sh` (all steps
 - **Kotlin**: 2.0+ (Analysis API 2.1.0 / K2/FIR)
 - **Gradle**: 6.0+ (Tooling API 8.12 connects to any project Gradle version)
 - **JVM**: Java 17+ required
-- **Android**: Supported. Auto-detects Android modules, adds `android.jar` from `ANDROID_HOME`, resolves classpath via init script (ADR-18), scans `build/generated/` for R/BuildConfig/KSP sources. Generated code (KSP/KAPT) requires running `./gradlew generateDebugResources generateDebugBuildConfig` once. Notification + code action provided.
+- **Android**: Supported. Auto-detects Android modules, adds `android.jar` from `ANDROID_HOME`, resolves classpath via init script (ADR-18), scans `build/generated/` for R/BuildConfig/KSP sources. Test source sets (`src/androidTest/`, `src/test/`) included in analysis session with test-specific classpath resolution (ADR-22). Generated code (KSP/KAPT) requires running `./gradlew generateDebugResources generateDebugBuildConfig` once. Notification + code action provided.
 - **KMP**: Not currently supported (JVM-only source modules configured)

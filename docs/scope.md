@@ -28,6 +28,9 @@
 16. Type inference in hover (inferred types shown for declarations without explicit type annotations) — added in 0.46.0
 17. Library/dependency completion + dot/member completion (scopeContext-based) — added in 0.49.0
 18. Android build variant selection, generated source file watchers, background code generation with progress — added in 0.50.0
+19. Hover annotation fix: skip leading annotations in signature extraction, handle multi-line annotations — added in 0.60.0
+20. Test source set support: androidTest + unit test files in analysis session, test classpath resolution via init script — added in 0.62.0
+21. Annotation hover: resolve to annotation class (not constructor), show `annotation class <FQN>` — added in 0.64.0
 
 ### Explicitly Out of Scope
 - Snippet completion, code generation, refactoring (extract method/variable)
