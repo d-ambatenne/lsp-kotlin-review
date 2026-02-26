@@ -4,6 +4,20 @@ All notable changes to the Kotlin Review LSP extension will be documented in thi
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.64.0] - 2026-02-26
+
+### Added
+
+- **Test source set support**: `src/test/` and `src/androidTest/` files are now included in the analysis session — hover, diagnostics, navigation, and completion all work on test files (ADR-22)
+- **Test classpath resolution**: Gradle init script now also resolves `debugAndroidTestCompileClasspath` and `debugUnitTestCompileClasspath` for test-only libraries (compose-ui-test, hilt-android-testing, espresso, junit)
+- **Annotation hover**: hovering on `@Inject`, `@HiltAndroidTest`, etc. shows `annotation class <FQN>` instead of the constructor signature (ADR-23)
+- **Regression test suite**: 11 integration tests covering annotation signature extraction, annotation hover, and test source set resolution
+
+### Fixed
+
+- **Hover on annotated declarations**: hovering on a property like `@Inject lateinit var x: T` showed `@Inject` as the signature — now correctly shows `lateinit var x: T`
+- **Stacked/multi-line annotations**: signature extraction now uses declaration keyword matching to reliably skip annotation blocks, including multi-line annotations with parameters (e.g. `@Named(\n  value = "x"\n)`)
+
 ## [0.45.0] - 2026-02-23
 
 ### Added
