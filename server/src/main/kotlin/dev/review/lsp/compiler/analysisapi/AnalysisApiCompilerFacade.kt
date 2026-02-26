@@ -270,12 +270,22 @@ class AnalysisApiCompilerFacade(
         }
     } catch (_: Exception) { null }
 
+    /** Declaration keywords that identify the start of the actual signature. */
+    private val declarationKeywordPattern = Regex(
+        """^\s*(val|var|fun|class|interface|object|enum|typealias|constructor|abstract|open|override|private|protected|internal|public|lateinit|const|suspend|inline|data|sealed|annotation|inner|companion|expect|actual|external|tailrec|operator|infix|crossinline|noinline|reified|vararg)\b"""
+    )
+
     /**
      * Extract the declaration signature line from PSI text, skipping leading
-     * annotation-only lines.  e.g. "@Inject\nlateinit var x: T" → "lateinit var x: T"
+     * annotation blocks (including multi-line annotations with parentheses).
+     * e.g. "@Inject\n@Named(\n  \"prefs\"\n)\nlateinit var x: T" → "lateinit var x: T"
      */
     private fun extractSignatureLine(psiText: String): String? {
         val lines = psiText.lines()
+        // Find the first line that looks like a declaration keyword, not annotation content
+        val declIndex = lines.indexOfFirst { declarationKeywordPattern.containsMatchIn(it) }
+        if (declIndex >= 0) return lines[declIndex].trim().take(120)
+        // Fallback: first non-empty, non-annotation line
         return (lines.firstOrNull { it.trim().let { t -> t.isNotEmpty() && !t.startsWith("@") } }
             ?: lines.firstOrNull())
             ?.trim()?.take(120)
