@@ -418,14 +418,20 @@ class AnalysisApiCompilerFacade(
 
     override fun getDiagnostics(file: Path): List<DiagnosticInfo> {
         val ktFile = findKtFile(file) ?: return emptyList()
+        // Use common-only checkers for KMP projects to avoid JVM-specific checkers
+        // crashing on multiplatform code analyzed with JvmPlatforms fallback
+        val checkerFilter = if (projectModel.isMultiplatform)
+            KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS
+        else
+            KaDiagnosticCheckerFilter.EXTENDED_AND_COMMON_CHECKERS
         return try {
             runOnAnalysisThread {
                 analyze(ktFile) {
-                    val raw = ktFile.collectDiagnostics(KaDiagnosticCheckerFilter.EXTENDED_AND_COMMON_CHECKERS)
+                    val raw = ktFile.collectDiagnostics(checkerFilter)
                     raw.mapNotNull { diagnostic -> mapDiagnostic(diagnostic, file) }
                 }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             System.err.println("Diagnostics analysis failed for $file: ${e.message}")
             emptyList()
         }
