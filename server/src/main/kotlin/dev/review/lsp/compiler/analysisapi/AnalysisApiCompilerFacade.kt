@@ -359,7 +359,11 @@ class AnalysisApiCompilerFacade(
             runOnAnalysisThread {
                 val element = findElementAt(ktFile, line, column)
                     ?: return@runOnAnalysisThread null
-                val ref = element as? KtReferenceExpression ?: (element.parent as? KtReferenceExpression)
+                val ref = element as? KtReferenceExpression
+                    ?: (element.parent as? KtReferenceExpression)
+                    // When hovering on '@' of an annotation, extract the type reference inside it
+                    ?: ((element as? KtAnnotationEntry) ?: (element.parent as? KtAnnotationEntry))
+                        ?.let { (it.typeReference?.typeElement as? KtUserType)?.referenceExpression }
                 if (ref != null) {
                     analyze(ref) {
                         val allRefs = ref.references
