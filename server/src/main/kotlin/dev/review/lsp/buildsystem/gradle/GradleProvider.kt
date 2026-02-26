@@ -1,6 +1,8 @@
 package dev.review.lsp.buildsystem.gradle
 
 import dev.review.lsp.buildsystem.BuildSystemProvider
+import dev.review.lsp.buildsystem.KmpPlatform
+import dev.review.lsp.buildsystem.KmpTarget
 import dev.review.lsp.buildsystem.ModuleInfo
 import dev.review.lsp.buildsystem.ProjectModel
 import org.gradle.tooling.GradleConnector
@@ -54,10 +56,16 @@ class GradleProvider : BuildSystemProvider {
             if (hasAndroid || anyEmptyClasspath) {
                 try {
                     System.err.println("[gradle] Running init script for classpath resolution (variant=$variant)...")
-                    val (resolvedCp, resolvedTestCp) = resolveClasspathViaInitScript(connection, workspaceRoot, variant)
+                    val resolvedClasspaths = resolveClasspathViaInitScript(connection, workspaceRoot, variant)
+                    val resolvedCp = resolvedClasspaths.main
+                    val resolvedTestCp = resolvedClasspaths.test
+                    val resolvedKmp = resolvedClasspaths.kmp
                     System.err.println("[gradle] Init script resolved ${resolvedCp.size} modules: ${resolvedCp.map { "${it.key}=${it.value.size}" }}")
                     if (resolvedTestCp.isNotEmpty()) {
                         System.err.println("[gradle] Init script resolved test classpath for ${resolvedTestCp.size} modules: ${resolvedTestCp.map { "${it.key}=${it.value.size}" }}")
+                    }
+                    if (resolvedKmp.isNotEmpty()) {
+                        System.err.println("[gradle] Init script resolved KMP classpaths for ${resolvedKmp.size} modules")
                     }
                     modules = modules.map { module ->
                         var updated = module
@@ -81,6 +89,32 @@ class GradleProvider : BuildSystemProvider {
                                 updated = updated.copy(testClasspath = updated.testClasspath + newEntries)
                             }
                         }
+                        // Merge KMP per-target classpaths
+                        if (updated.targets.isNotEmpty()) {
+                            val moduleKmp = resolvedKmp[module.name]
+                            if (moduleKmp != null && moduleKmp.isNotEmpty()) {
+                                val updatedTargets = updated.targets.map { target ->
+                                    val existingPaths = target.classpath.map { it.normalize() }.toSet()
+                                    val newEntries = mutableListOf<Path>()
+                                    for ((configName, paths) in moduleKmp) {
+                                        val platform = configNameToKmpPlatform(configName) ?: continue
+                                        if (platform != target.platform) continue
+                                        for (p in paths) {
+                                            if (p.normalize() !in existingPaths && p !in newEntries) {
+                                                newEntries.add(p)
+                                            }
+                                        }
+                                    }
+                                    if (newEntries.isNotEmpty()) {
+                                        System.err.println("[gradle] module '${module.name}': KMP target '${target.name}' +${newEntries.size} classpath entries")
+                                        target.copy(classpath = target.classpath + newEntries)
+                                    } else {
+                                        target
+                                    }
+                                }
+                                updated = updated.copy(targets = updatedTargets)
+                            }
+                        }
                         updated
                     }
                 } catch (e: Exception) {
@@ -91,7 +125,14 @@ class GradleProvider : BuildSystemProvider {
                 System.err.println("[gradle] Skipping init script (no Android modules and no empty classpath)")
             }
 
-            ProjectModel(modules = modules, variant = variant)
+            val isKmp = modules.any { it.targets.isNotEmpty() }
+            if (isKmp) {
+                for (m in modules.filter { it.targets.isNotEmpty() }) {
+                    System.err.println("[gradle] KMP module '${m.name}': targets=${m.targets.map { "${it.name}(${it.platform})" }}")
+                }
+            }
+
+            ProjectModel(modules = modules, variant = variant, isMultiplatform = isKmp)
         } finally {
             connection.close()
         }
@@ -136,6 +177,10 @@ class GradleProvider : BuildSystemProvider {
         // Detect Android module
         val isAndroid = detectAndroid(moduleDir, classpath)
 
+        // Detect KMP module
+        val isKmp = detectKmp(moduleDir)
+        val kmpTargets = if (isKmp && moduleDir != null) resolveKmpTargets(moduleDir) else emptyList()
+
         // Android modules often don't report source dirs through IdeaModule.
         // Fall back to conventional Android source directory layout.
         if (moduleDir != null && sourceRoots.isEmpty()) {
@@ -167,13 +212,15 @@ class GradleProvider : BuildSystemProvider {
             testClasspath = testClasspath,
             kotlinVersion = null,
             jvmTarget = null,
-            isAndroid = isAndroid
+            isAndroid = isAndroid,
+            targets = kmpTargets
         )
     }
 
     private data class ResolvedClasspaths(
         val main: Map<String, List<Path>>,
-        val test: Map<String, List<Path>>
+        val test: Map<String, List<Path>>,
+        val kmp: Map<String, Map<String, List<Path>>> = emptyMap()  // module -> configName -> paths
     )
 
     private fun resolveClasspathViaInitScript(
@@ -235,6 +282,22 @@ class GradleProvider : BuildSystemProvider {
                                     println "LSPERR:" + project.name + ":test:" + configName + ":" + e.message?.take(200)
                                 }
                             }
+
+                            // --- KMP per-target classpaths ---
+                            def kmpConfigs = configurations.names.findAll {
+                                it.matches(/^(jvm|android|ios|js|wasmJs|native|linux|macos|mingw).*[Cc]ompile[Cc]lasspath$/)
+                            }
+                            for (configName in kmpConfigs) {
+                                def cp = configurations.findByName(configName)
+                                if (cp == null || !cp.canBeResolved) continue
+                                try {
+                                    cp.incoming.artifactView { lenient = true }.files.each { file ->
+                                        println "LSPKMP:" + project.name + ":" + configName + ":" + file.absolutePath
+                                    }
+                                } catch (e) {
+                                    println "LSPERR:" + project.name + ":kmp:" + configName + ":" + e.message?.take(200)
+                                }
+                            }
                         }
                     }
                 }
@@ -250,6 +313,7 @@ class GradleProvider : BuildSystemProvider {
 
             val mainResult = mutableMapOf<String, MutableList<Path>>()
             val testResult = mutableMapOf<String, MutableList<Path>>()
+            val kmpResult = mutableMapOf<String, MutableMap<String, MutableList<Path>>>()
             outputStream.toString().lines().forEach { line ->
                 when {
                     line.startsWith("LSPCP:") -> {
@@ -272,13 +336,38 @@ class GradleProvider : BuildSystemProvider {
                             }
                         }
                     }
+                    line.startsWith("LSPKMP:") -> {
+                        val parts = line.removePrefix("LSPKMP:").split(":", limit = 3)
+                        if (parts.size == 3) {
+                            val moduleName = parts[0]
+                            val configName = parts[1]
+                            val filePath = Path.of(parts[2])
+                            if (Files.exists(filePath)) {
+                                kmpResult
+                                    .getOrPut(moduleName) { mutableMapOf() }
+                                    .getOrPut(configName) { mutableListOf() }
+                                    .add(filePath)
+                            }
+                        }
+                    }
                     line.startsWith("LSPERR:") -> System.err.println("[gradle] $line")
                     line.startsWith("LSPDBG:") -> System.err.println("[gradle] $line")
                 }
             }
-            return ResolvedClasspaths(mainResult, testResult)
+            return ResolvedClasspaths(mainResult, testResult, kmpResult)
         } finally {
             Files.deleteIfExists(initScript)
+        }
+    }
+
+    private fun configNameToKmpPlatform(configName: String): KmpPlatform? {
+        val lower = configName.lowercase()
+        return when {
+            lower.startsWith("jvm") -> KmpPlatform.JVM
+            lower.startsWith("android") || lower.startsWith("debug") || lower.startsWith("release") -> KmpPlatform.ANDROID
+            lower.startsWith("ios") || lower.startsWith("native") || lower.startsWith("linux") || lower.startsWith("macos") || lower.startsWith("mingw") -> KmpPlatform.NATIVE
+            lower.startsWith("js") || lower.startsWith("wasmjs") -> KmpPlatform.JS
+            else -> null
         }
     }
 
@@ -309,6 +398,120 @@ class GradleProvider : BuildSystemProvider {
         }
 
         return false
+    }
+
+    private fun detectKmp(moduleDir: Path?): Boolean {
+        if (moduleDir == null) return false
+
+        for (buildFile in listOf("build.gradle.kts", "build.gradle")) {
+            val path = moduleDir.resolve(buildFile)
+            if (Files.exists(path)) {
+                val content = try { Files.readString(path) } catch (_: Exception) { continue }
+                if (content.contains("kotlin(\"multiplatform\")") ||
+                    content.contains("org.jetbrains.kotlin.multiplatform") ||
+                    content.contains("id(\"org.jetbrains.kotlin.multiplatform\")")) {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
+    private fun resolveKmpTargets(moduleDir: Path): List<KmpTarget> {
+        val srcDir = moduleDir.resolve("src")
+        if (!Files.isDirectory(srcDir)) return emptyList()
+
+        // Map of source set directory name prefix to KmpPlatform
+        val targetMapping = mapOf(
+            "jvm" to KmpPlatform.JVM,
+            "android" to KmpPlatform.ANDROID,
+            "iosArm64" to KmpPlatform.NATIVE,
+            "iosX64" to KmpPlatform.NATIVE,
+            "iosSimulatorArm64" to KmpPlatform.NATIVE,
+            "ios" to KmpPlatform.NATIVE,
+            "macosArm64" to KmpPlatform.NATIVE,
+            "macos" to KmpPlatform.NATIVE,
+            "linuxX64" to KmpPlatform.NATIVE,
+            "mingwX64" to KmpPlatform.NATIVE,
+            "native" to KmpPlatform.NATIVE,
+            "js" to KmpPlatform.JS,
+            "wasmJs" to KmpPlatform.JS
+        )
+
+        // Intermediate source sets that fold into leaf targets
+        val nativeIntermediates = setOf("native", "ios", "macos")
+
+        val targets = mutableListOf<KmpTarget>()
+
+        for ((targetName, platform) in targetMapping) {
+            val mainDir = srcDir.resolve("${targetName}Main/kotlin")
+            val testDir = srcDir.resolve("${targetName}Test/kotlin")
+
+            if (!Files.isDirectory(mainDir) && !Files.isDirectory(testDir)) continue
+
+            val sourceRoots = mutableListOf<Path>()
+            val testSourceRoots = mutableListOf<Path>()
+
+            if (Files.isDirectory(mainDir)) sourceRoots.add(mainDir)
+            if (Files.isDirectory(testDir)) testSourceRoots.add(testDir)
+
+            // Also check java subdirectory variant
+            val mainJavaDir = srcDir.resolve("${targetName}Main/java")
+            val testJavaDir = srcDir.resolve("${targetName}Test/java")
+            if (Files.isDirectory(mainJavaDir)) sourceRoots.add(mainJavaDir)
+            if (Files.isDirectory(testJavaDir)) testSourceRoots.add(testJavaDir)
+
+            // For leaf native targets, fold in intermediate source sets
+            if (platform == KmpPlatform.NATIVE && targetName !in nativeIntermediates) {
+                // Fold nativeMain/nativeTest
+                val nativeMainDir = srcDir.resolve("nativeMain/kotlin")
+                val nativeTestDir = srcDir.resolve("nativeTest/kotlin")
+                if (Files.isDirectory(nativeMainDir)) sourceRoots.add(nativeMainDir)
+                if (Files.isDirectory(nativeTestDir)) testSourceRoots.add(nativeTestDir)
+
+                // Fold iOS intermediates for iOS-specific targets
+                if (targetName.startsWith("ios")) {
+                    val iosMainDir = srcDir.resolve("iosMain/kotlin")
+                    val iosTestDir = srcDir.resolve("iosTest/kotlin")
+                    if (Files.isDirectory(iosMainDir)) sourceRoots.add(iosMainDir)
+                    if (Files.isDirectory(iosTestDir)) testSourceRoots.add(iosTestDir)
+                }
+
+                // Fold macOS intermediates for macOS-specific targets
+                if (targetName.startsWith("macos") && targetName != "macos") {
+                    val macosMainDir = srcDir.resolve("macosMain/kotlin")
+                    val macosTestDir = srcDir.resolve("macosTest/kotlin")
+                    if (Files.isDirectory(macosMainDir)) sourceRoots.add(macosMainDir)
+                    if (Files.isDirectory(macosTestDir)) testSourceRoots.add(macosTestDir)
+                }
+            }
+
+            // Skip intermediate source sets that are already folded into leaf targets
+            if (targetName in nativeIntermediates) {
+                // Only emit intermediate as a standalone target if no leaf targets exist for it
+                val hasLeafTargets = when (targetName) {
+                    "native" -> targetMapping.keys.any { it !in nativeIntermediates && targetMapping[it] == KmpPlatform.NATIVE && Files.isDirectory(srcDir.resolve("${it}Main/kotlin")) }
+                    "ios" -> listOf("iosArm64", "iosX64", "iosSimulatorArm64").any { Files.isDirectory(srcDir.resolve("${it}Main/kotlin")) }
+                    "macos" -> listOf("macosArm64").any { Files.isDirectory(srcDir.resolve("${it}Main/kotlin")) }
+                    else -> false
+                }
+                if (hasLeafTargets) continue
+            }
+
+            targets.add(
+                KmpTarget(
+                    name = targetName,
+                    platform = platform,
+                    sourceRoots = sourceRoots,
+                    testSourceRoots = testSourceRoots,
+                    classpath = emptyList(),
+                    testClasspath = emptyList()
+                )
+            )
+        }
+
+        return targets
     }
 
     private fun findAndroidJar(): Path? {

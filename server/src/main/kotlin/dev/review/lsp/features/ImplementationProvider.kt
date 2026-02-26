@@ -16,8 +16,17 @@ class ImplementationProvider(private val facade: CompilerFacade) {
             val symbol = facade.resolveAtPosition(path, line, col)
                 ?: return@supplyAsync Either.forLeft(emptyList())
 
+            val results = mutableListOf<Location>()
+
+            // Check for expect/actual counterparts (KMP cross-platform navigation)
+            val counterparts = facade.findExpectActualCounterparts(path, line, col)
+            results.addAll(counterparts.map { PositionConverter.toLspLocation(it.location) })
+
+            // Also check for class/interface implementations
             val impls = facade.findImplementations(symbol)
-            Either.forLeft(impls.map { PositionConverter.toLspLocation(it) })
+            results.addAll(impls.map { PositionConverter.toLspLocation(it) })
+
+            Either.forLeft(results)
         }
     }
 }

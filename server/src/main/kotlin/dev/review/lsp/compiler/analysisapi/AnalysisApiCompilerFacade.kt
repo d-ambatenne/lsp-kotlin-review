@@ -1,5 +1,6 @@
 package dev.review.lsp.compiler.analysisapi
 
+import dev.review.lsp.buildsystem.KmpPlatform
 import dev.review.lsp.buildsystem.ProjectModel
 import dev.review.lsp.compiler.*
 import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
@@ -60,17 +61,14 @@ class AnalysisApiCompilerFacade(
     }
 
     @Volatile
-    private var _session: org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession? = null
+    private var sessions: Map<KmpPlatform, org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession> = emptyMap()
 
     private val session: org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession
-        get() {
-            var s = _session
-            if (s == null) {
-                s = buildSession()
-                _session = s
-            }
-            return s
-        }
+        get() = sessions.values.firstOrNull() ?: throw IllegalStateException("No analysis session available")
+
+    init {
+        sessions = buildSessions()
+    }
 
     /** Extract classes.jar from an AAR file to a temp directory. */
     private fun extractClassesFromAar(aar: Path): Path? {
@@ -90,12 +88,14 @@ class AnalysisApiCompilerFacade(
         }
     }
 
-    private fun buildSession(): org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession {
-        // Deduplicate classpath jars across all modules
-        val rawClasspath = projectModel.modules.flatMap { it.classpath + it.testClasspath }.distinct()
-
+    private fun buildSingleSession(
+        targetPlatform: org.jetbrains.kotlin.platform.TargetPlatform,
+        sourceRoots: List<Path>,
+        classpathJars: List<Path>,
+        includeJdk: Boolean
+    ): org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession {
         // Extract classes.jar from AAR files (Android Archive bundles)
-        val allClasspath = rawClasspath.flatMap { entry ->
+        val allClasspath = classpathJars.flatMap { entry ->
             if (entry.toString().endsWith(".aar")) {
                 val extracted = extractClassesFromAar(entry)
                 if (extracted != null) listOf(extracted) else emptyList()
@@ -103,41 +103,41 @@ class AnalysisApiCompilerFacade(
                 listOf(entry)
             }
         }
-        System.err.println("[session] Classpath: ${rawClasspath.size} entries (${rawClasspath.count { it.toString().endsWith(".aar") }} AARs extracted), ${allClasspath.size} JARs total")
+        val aarCount = classpathJars.count { it.toString().endsWith(".aar") }
+        System.err.println("[session] Classpath: ${classpathJars.size} entries ($aarCount AARs extracted), ${allClasspath.size} JARs total")
 
         return buildStandaloneAnalysisAPISession {
             buildKtModuleProvider {
-                platform = JvmPlatforms.defaultJvmPlatform
+                platform = targetPlatform
 
                 val libraryModules = allClasspath.map { jar ->
                     addModule(buildKtLibraryModule {
-                        this.platform = JvmPlatforms.defaultJvmPlatform
+                        this.platform = targetPlatform
                         libraryName = jar.fileName.toString()
                         addBinaryRoot(jar)
                     })
                 }
 
-                val jdkModule = addModule(buildKtSdkModule {
-                    this.platform = JvmPlatforms.defaultJvmPlatform
-                    libraryName = "jdk"
-                    addBinaryRootsFromJdkHome(
-                        Path.of(System.getProperty("java.home")),
-                        isJre = true
-                    )
-                })
+                val sdkModule = if (includeJdk) {
+                    addModule(buildKtSdkModule {
+                        this.platform = targetPlatform
+                        libraryName = "jdk"
+                        addBinaryRootsFromJdkHome(
+                            Path.of(System.getProperty("java.home")),
+                            isJre = true
+                        )
+                    })
+                } else null
 
-                // Merge all source roots into a single module for cross-module resolution.
-                // The standalone Analysis API doesn't support inter-module dependencies
-                // without complex dependency graph wiring. A single merged module gives
-                // full cross-module navigation/completion for code review purposes.
-                val allSourceRoots = projectModel.modules.flatMap { it.sourceRoots + it.testSourceRoots }.distinct()
                 addModule(buildKtSourceModule {
                     moduleName = projectModel.modules.firstOrNull()?.name ?: "sources"
-                    this.platform = JvmPlatforms.defaultJvmPlatform
-                    for (root in allSourceRoots) {
+                    this.platform = targetPlatform
+                    for (root in sourceRoots) {
                         addSourceRoot(root)
                     }
-                    addRegularDependency(jdkModule)
+                    if (sdkModule != null) {
+                        addRegularDependency(sdkModule)
+                    }
                     for (lib in libraryModules) {
                         addRegularDependency(lib)
                     }
@@ -146,16 +146,94 @@ class AnalysisApiCompilerFacade(
         }
     }
 
-    private fun allKtFiles(): List<KtFile> =
-        session.modulesWithFiles.values
-            .flatten()
-            .filterIsInstance<KtFile>()
+    private fun buildSessions(): Map<KmpPlatform, org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession> {
+        val kmpTargets = projectModel.modules.flatMap { it.targets }
+        if (kmpTargets.isEmpty()) {
+            // Non-KMP: single session with all source roots (existing behavior)
+            val allSourceRoots = projectModel.modules.flatMap { it.sourceRoots + it.testSourceRoots }.distinct()
+            val rawClasspath = projectModel.modules.flatMap { it.classpath + it.testClasspath }.distinct()
+            return mapOf(KmpPlatform.JVM to buildSingleSession(JvmPlatforms.defaultJvmPlatform, allSourceRoots, rawClasspath, true))
+        }
 
-    private fun findKtFile(file: Path): KtFile? =
-        allKtFiles().find { ktFile ->
+        // KMP: one session per platform
+        val byPlatform = kmpTargets.groupBy { it.platform }
+
+        return byPlatform.map { (platform, targets) ->
+            // Use JvmPlatforms for all targets — JsPlatforms/NativePlatforms may not be
+            // available from the standalone Analysis API dependencies.
+            // TODO: Use JsPlatforms.defaultJsPlatform and NativePlatforms.unspecifiedNativePlatform
+            //       when those classes are confirmed available on the classpath.
+            val platformType = when (platform) {
+                KmpPlatform.JVM -> JvmPlatforms.defaultJvmPlatform
+                KmpPlatform.ANDROID -> JvmPlatforms.defaultJvmPlatform
+                KmpPlatform.JS -> JvmPlatforms.defaultJvmPlatform
+                KmpPlatform.NATIVE -> JvmPlatforms.defaultJvmPlatform
+            }
+
+            // Source roots: module-level roots + target-specific roots
+            val moduleSourceRoots = projectModel.modules.flatMap { it.sourceRoots + it.testSourceRoots }.distinct()
+            val targetSourceRoots = targets.flatMap { it.sourceRoots + it.testSourceRoots }
+            val allRoots = (moduleSourceRoots + targetSourceRoots).distinct()
+
+            // Classpath: module-level + target-specific
+            val moduleClasspath = projectModel.modules.flatMap { it.classpath + it.testClasspath }
+            val targetClasspath = targets.flatMap { it.classpath + it.testClasspath }
+            val allClasspath = (moduleClasspath + targetClasspath).distinct()
+
+            val includeJdk = platform == KmpPlatform.JVM || platform == KmpPlatform.ANDROID
+            System.err.println("[session] Building $platform session: ${allRoots.size} source roots, ${allClasspath.size} classpath entries")
+            platform to buildSingleSession(platformType, allRoots, allClasspath, includeJdk)
+        }.toMap()
+    }
+
+    private fun kmpPlatformForFile(file: Path): KmpPlatform {
+        if (sessions.size <= 1) return sessions.keys.firstOrNull() ?: KmpPlatform.JVM
+        val pathStr = file.toString()
+        return when {
+            pathStr.contains("/androidMain/") || pathStr.contains("/androidTest/") -> KmpPlatform.ANDROID
+            pathStr.contains("/jvmMain/") || pathStr.contains("/jvmTest/") -> KmpPlatform.JVM
+            pathStr.contains("/iosMain/") || pathStr.contains("/nativeMain/") || pathStr.contains("/iosTest/") || pathStr.contains("/nativeTest/") -> KmpPlatform.NATIVE
+            pathStr.contains("/jsMain/") || pathStr.contains("/jsTest/") || pathStr.contains("/wasmJsMain/") || pathStr.contains("/wasmJsTest/") -> KmpPlatform.JS
+            else -> sessions.keys.firstOrNull { it == KmpPlatform.JVM }
+                ?: sessions.keys.firstOrNull { it == KmpPlatform.ANDROID }
+                ?: sessions.keys.firstOrNull()
+                ?: KmpPlatform.JVM
+        }
+    }
+
+    override fun platformForFile(file: Path): String? {
+        if (sessions.size <= 1 && projectModel.modules.none { it.targets.isNotEmpty() }) return null
+        return kmpPlatformForFile(file).name
+    }
+
+    override fun getAvailableTargets(): List<String> {
+        return sessions.keys.map { it.name }
+    }
+
+    private fun sessionForFile(file: Path): org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession {
+        return sessions[kmpPlatformForFile(file)] ?: session
+    }
+
+    private fun allKtFiles(): List<KtFile> =
+        sessions.values.flatMap { s ->
+            s.modulesWithFiles.values.flatten().filterIsInstance<KtFile>()
+        }.distinctBy { it.virtualFile?.path }
+
+    private fun findKtFile(file: Path): KtFile? {
+        val targetSession = sessionForFile(file)
+        val ktFile = targetSession.modulesWithFiles.values.flatten()
+            .filterIsInstance<KtFile>()
+            .find { ktFile ->
+                val ktPath = ktFile.virtualFile?.path?.let { Path.of(it) }
+                ktPath != null && (ktPath == file || ktPath.normalize() == file.normalize())
+            }
+        if (ktFile != null) return ktFile
+        // Fall back: search all sessions
+        return allKtFiles().find { ktFile ->
             val ktPath = ktFile.virtualFile?.path?.let { Path.of(it) }
             ktPath != null && (ktPath == file || ktPath.normalize() == file.normalize())
         }
+    }
 
     private fun findElementAt(ktFile: KtFile, line: Int, column: Int): KtElement? {
         val document = ktFile.viewProvider.document ?: return null
@@ -1051,18 +1129,121 @@ class AnalysisApiCompilerFacade(
         }
     }
 
+    override fun findExpectActualCounterparts(file: Path, line: Int, column: Int): List<ResolvedSymbol> {
+        val ktFile = findKtFile(file) ?: return emptyList()
+        return try {
+            runOnAnalysisThread {
+                val element = findElementAt(ktFile, line, column) ?: return@runOnAnalysisThread emptyList()
+                val decl = element as? KtNamedDeclaration
+                    ?: (element.parent as? KtNamedDeclaration)
+                    ?: return@runOnAnalysisThread emptyList()
+
+                val fqName = decl.fqName?.asString() ?: return@runOnAnalysisThread emptyList()
+                val isExpect = decl.hasModifier(org.jetbrains.kotlin.lexer.KtTokens.EXPECT_KEYWORD)
+                val isActual = decl.hasModifier(org.jetbrains.kotlin.lexer.KtTokens.ACTUAL_KEYWORD)
+                if (!isExpect && !isActual) return@runOnAnalysisThread emptyList()
+
+                val currentPlatform = kmpPlatformForFile(file)
+
+                if (isExpect) {
+                    // Find actuals in all OTHER sessions
+                    sessions.flatMap { (platform, targetSession) ->
+                        if (platform == currentPlatform) emptyList()
+                        else findDeclarationsInSession(targetSession, fqName, hasExpect = false)
+                    }
+                } else {
+                    // Find expect in the common/primary session (prefer JVM as primary for common files)
+                    val primaryPlatform = sessions.keys.firstOrNull { it == KmpPlatform.JVM }
+                        ?: sessions.keys.firstOrNull { it == KmpPlatform.ANDROID }
+                        ?: sessions.keys.firstOrNull()
+                    val primarySession = primaryPlatform?.let { sessions[it] }
+                    if (primarySession != null) {
+                        findDeclarationsInSession(primarySession, fqName, hasExpect = true)
+                    } else emptyList()
+                }
+            }
+        } catch (e: Exception) {
+            System.err.println("findExpectActualCounterparts failed for $file:$line:$column: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private fun findDeclarationsInSession(
+        targetSession: org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession,
+        fqName: String,
+        hasExpect: Boolean
+    ): List<ResolvedSymbol> {
+        val results = mutableListOf<ResolvedSymbol>()
+        val ktFiles = targetSession.modulesWithFiles.values.flatten().filterIsInstance<KtFile>()
+        for (ktFile in ktFiles) {
+            for (decl in ktFile.declarations) {
+                findMatchingDeclarations(decl, fqName, hasExpect, results)
+            }
+        }
+        return results
+    }
+
+    private fun findMatchingDeclarations(
+        decl: KtDeclaration,
+        fqName: String,
+        hasExpect: Boolean,
+        results: MutableList<ResolvedSymbol>
+    ) {
+        if (decl is KtNamedDeclaration) {
+            val declFqName = decl.fqName?.asString()
+            if (declFqName == fqName) {
+                val matchesModifier = if (hasExpect) {
+                    decl.hasModifier(org.jetbrains.kotlin.lexer.KtTokens.EXPECT_KEYWORD)
+                } else {
+                    decl.hasModifier(org.jetbrains.kotlin.lexer.KtTokens.ACTUAL_KEYWORD)
+                }
+                if (matchesModifier) {
+                    val loc = psiToSourceLocation(decl)
+                    if (loc != null) {
+                        val kind = when (decl) {
+                            is KtClass -> when {
+                                decl.isInterface() -> SymbolKind.INTERFACE
+                                decl.isEnum() -> SymbolKind.ENUM
+                                else -> SymbolKind.CLASS
+                            }
+                            is KtObjectDeclaration -> SymbolKind.OBJECT
+                            is KtNamedFunction -> SymbolKind.FUNCTION
+                            is KtProperty -> SymbolKind.PROPERTY
+                            is KtTypeAlias -> SymbolKind.TYPE_ALIAS
+                            else -> SymbolKind.PROPERTY
+                        }
+                        results.add(ResolvedSymbol(
+                            name = decl.name ?: "unknown",
+                            kind = kind,
+                            location = loc,
+                            containingClass = (decl.parent as? KtClassOrObject)?.name,
+                            signature = decl.text?.let { extractSignatureLine(it) },
+                            fqName = declFqName
+                        ))
+                    }
+                }
+            }
+        }
+        // Recurse into class/object bodies
+        if (decl is KtClassOrObject) {
+            decl.declarations.forEach { child ->
+                findMatchingDeclarations(child, fqName, hasExpect, results)
+            }
+        }
+    }
+
     override fun refreshAnalysis() {
         // The standalone Analysis API's PSI/FIR are immutable after session creation.
-        // The only way to pick up file changes is to rebuild the entire session from disk.
+        // The only way to pick up file changes is to rebuild all sessions from disk.
         synchronized(symbolCache) {
             symbolCache.clear()
         }
         try {
             runOnAnalysisThread {
-                // Release old session to free memory before building a new one
-                _session = null
+                // Release old sessions to free memory before building new ones
+                sessions = emptyMap()
                 System.gc()
-                _session = buildSession()
+                sessions = buildSessions()
             }
         } catch (e: Exception) {
             System.err.println("Session rebuild failed: ${e.message}")

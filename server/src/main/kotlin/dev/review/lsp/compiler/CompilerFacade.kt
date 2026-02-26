@@ -26,10 +26,18 @@ interface CompilerFacade {
 
     fun getTypeDefinitionLocation(file: Path, line: Int, column: Int): SourceLocation? = null
 
+    fun findExpectActualCounterparts(file: Path, line: Int, column: Int): List<ResolvedSymbol> = emptyList()
+
     fun updateFileContent(file: Path, content: String)
 
     /** Rebuild the analysis session from disk. Called on file save. */
     fun refreshAnalysis() {}
+
+    /** Return the KMP platform name for a file (e.g. "JVM", "ANDROID", "JS", "NATIVE"), or null for non-KMP projects. */
+    fun platformForFile(file: Path): String? = null
+
+    /** Return available KMP target names, or empty for non-KMP projects. */
+    fun getAvailableTargets(): List<String> = emptyList()
 
     fun dispose()
 }

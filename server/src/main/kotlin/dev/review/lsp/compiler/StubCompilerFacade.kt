@@ -24,6 +24,8 @@ open class StubCompilerFacade : CompilerFacade {
 
     override fun computeRename(context: RenameContext, newName: String): List<FileEdit> = emptyList()
 
+    override fun findExpectActualCounterparts(file: Path, line: Int, column: Int): List<ResolvedSymbol> = emptyList()
+
     override fun updateFileContent(file: Path, content: String) {}
 
     override fun dispose() {}

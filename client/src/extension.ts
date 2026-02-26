@@ -11,8 +11,39 @@ import { getServerJvmArgs, getTraceServer, getBuildVariant, getAutoGenerate } fr
 
 let client: LanguageClient | undefined;
 let androidStatusBar: vscode.StatusBarItem | undefined;
+let platformStatusBar: vscode.StatusBarItem | undefined;
 let generateTimer: ReturnType<typeof setTimeout> | undefined;
 let generating = false;
+
+function detectPlatformFromPath(filePath: string): string | null {
+  if (filePath.includes("/androidMain/") || filePath.includes("/androidTest/")) return "androidMain";
+  if (filePath.includes("/jvmMain/") || filePath.includes("/jvmTest/")) return "jvmMain";
+  if (filePath.includes("/iosMain/") || filePath.includes("/iosTest/")) return "iosMain";
+  if (filePath.includes("/nativeMain/") || filePath.includes("/nativeTest/")) return "nativeMain";
+  if (filePath.includes("/jsMain/") || filePath.includes("/jsTest/")) return "jsMain";
+  if (filePath.includes("/wasmJsMain/") || filePath.includes("/wasmJsTest/")) return "wasmJsMain";
+  if (filePath.includes("/commonMain/") || filePath.includes("/commonTest/")) return "commonMain";
+  return null;
+}
+
+function updatePlatformIndicator(editor: vscode.TextEditor | undefined): void {
+  if (!platformStatusBar) return;
+  if (!editor || editor.document.languageId !== "kotlin") {
+    platformStatusBar.hide();
+    return;
+  }
+  const filePath = editor.document.uri.fsPath;
+  const platform = detectPlatformFromPath(filePath);
+  if (platform) {
+    platformStatusBar.text = `$(symbol-class) Kotlin: ${platform}`;
+    platformStatusBar.tooltip = platform === "commonMain"
+      ? "Click to switch primary target for common files"
+      : `KMP source set: ${platform}`;
+    platformStatusBar.show();
+  } else {
+    platformStatusBar.hide();
+  }
+}
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const outputChannel = vscode.window.createOutputChannel("Kotlin Review");
@@ -78,7 +109,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   androidStatusBar.show();
   context.subscriptions.push(androidStatusBar);
 
+  // --- KMP platform indicator ---
+  platformStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  platformStatusBar.command = "kotlinReview.selectPrimaryTarget";
+  context.subscriptions.push(platformStatusBar);
+
+  vscode.window.onDidChangeActiveTextEditor(updatePlatformIndicator, null, context.subscriptions);
+  updatePlatformIndicator(vscode.window.activeTextEditor);
+
   // --- Commands ---
+
+  // Select primary KMP target for common files
+  context.subscriptions.push(
+    vscode.commands.registerCommand("kotlinReview.selectPrimaryTarget", async () => {
+      const targets = ["JVM", "Android", "iOS/Native", "JS"];
+      const selected = await vscode.window.showQuickPick(targets, {
+        placeHolder: "Select primary target for common files",
+      });
+      if (selected) {
+        vscode.window.showInformationMessage(`Primary target set to: ${selected}`);
+      }
+    })
+  );
 
   // Generate sources (from code action or manual trigger)
   context.subscriptions.push(
@@ -204,6 +256,8 @@ function runCodeGeneration(projectDir: string, outputChannel: vscode.OutputChann
 
 export async function deactivate(): Promise<void> {
   if (generateTimer) clearTimeout(generateTimer);
+  platformStatusBar?.dispose();
+  platformStatusBar = undefined;
   if (client) {
     await client.stop();
     client = undefined;

@@ -4,6 +4,22 @@ All notable changes to the Kotlin Review LSP extension will be documented in thi
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.70.0] - 2026-02-26
+
+### Added
+
+- **Kotlin Multiplatform (KMP) support** (ADR-24):
+  - **Per-target Analysis API sessions**: separate sessions for JVM, Android, JS, and Native platforms with correct platform types and merged source roots (common + target-specific)
+  - **KMP detection**: auto-detect `kotlin("multiplatform")` plugin in build.gradle, enumerate targets from conventional source set directories
+  - **Per-target classpath resolution**: Gradle init script resolves `jvmCompileClasspath`, `iosArm64CompileClasspath`, `jsCompileClasspath`, etc. via `LSPKMP:` prefix
+  - **Expect/actual navigation**: go-to-implementation on `expect` declarations returns `actual` counterparts across platforms; hover shows which targets have implementations
+  - **Per-file platform indicator**: VS Code status bar shows `Kotlin: jvmMain` / `Kotlin: commonMain` etc. with click-to-switch target for common files
+  - **File routing**: path-based detection (`/jvmMain/` → JVM session, `/jsMain/` → JS session) routes all LSP features to the correct session
+- KMP test fixture and 8 integration tests (common/jvm/js file resolution, file routing, expect/actual navigation)
+- `platformForFile()` and `getAvailableTargets()` methods on `CompilerFacade`
+- `findExpectActualCounterparts()` method on `CompilerFacade` for cross-platform expect/actual resolution
+- `kotlinReview.selectPrimaryTarget` command for target switching
+
 ## [0.65.0] - 2026-02-26
 
 ### Added

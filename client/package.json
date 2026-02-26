@@ -2,7 +2,7 @@
   "name": "kotlin-review",
   "displayName": "Kotlin Review",
   "description": "Kotlin language support for code review and small changes",
-  "version": "0.65.0",
+  "version": "0.70.0",
   "publisher": "kotlin-review",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -60,6 +60,10 @@
       {
         "command": "kotlinReview.selectBuildVariant",
         "title": "Kotlin Review: Select Android Build Variant"
+      },
+      {
+        "command": "kotlinReview.selectPrimaryTarget",
+        "title": "Kotlin Review: Select Primary KMP Target"
       }
     ],
     "configuration": {

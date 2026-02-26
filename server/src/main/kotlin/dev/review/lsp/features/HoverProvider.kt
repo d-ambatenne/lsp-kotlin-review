@@ -33,6 +33,38 @@ class HoverProvider(private val facade: CompilerFacade) {
                 facade.getDocumentation(symbol)?.let { parts.add(it) }
             }
 
+            // Expect/actual counterpart info (KMP)
+            val counterparts = facade.findExpectActualCounterparts(path, line, col)
+            if (counterparts.isNotEmpty()) {
+                val sig = symbol?.signature ?: ""
+                if (sig.trimStart().startsWith("expect ")) {
+                    val platforms = counterparts.mapNotNull { cp ->
+                        val cpPath = cp.location.path.toString()
+                        when {
+                            cpPath.contains("/jvmMain/") -> "jvm"
+                            cpPath.contains("/androidMain/") -> "android"
+                            cpPath.contains("/jsMain/") || cpPath.contains("/wasmJsMain/") -> "js"
+                            cpPath.contains("/iosMain/") || cpPath.contains("/nativeMain/") -> "native"
+                            else -> null
+                        }
+                    }.distinct()
+                    parts.add("**expect** declaration (actual in: ${platforms.joinToString(", ")})")
+                } else {
+                    val expectPlatforms = counterparts.mapNotNull { cp ->
+                        val cpPath = cp.location.path.toString()
+                        when {
+                            cpPath.contains("/commonMain/") || cpPath.contains("/commonTest/") -> "common"
+                            cpPath.contains("/jvmMain/") -> "jvm"
+                            cpPath.contains("/androidMain/") -> "android"
+                            cpPath.contains("/jsMain/") -> "js"
+                            cpPath.contains("/iosMain/") || cpPath.contains("/nativeMain/") -> "native"
+                            else -> null
+                        }
+                    }.distinct()
+                    parts.add("**actual** implementation (expect in: ${expectPlatforms.joinToString(", ")})")
+                }
+            }
+
             if (parts.isEmpty()) return@supplyAsync null
 
             Hover(MarkupContent(MarkupKind.MARKDOWN, parts.joinToString("\n\n")))

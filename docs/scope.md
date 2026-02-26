@@ -33,8 +33,8 @@
 21. Annotation hover: resolve to annotation class (not constructor), show `annotation class <FQN>` — added in 0.64.0
 22. Debounced file watcher rebuilds (2s window) to batch rapid generated source changes — added in 0.65.0
 
-### P3 - Future (Designed, Not Implemented)
-23. Kotlin Multiplatform support — per-target Analysis API sessions (JVM, Android, iOS/Native, JS), KMP source set detection, expect/actual navigation, per-file platform indicator — see `docs/kmp-design.md`
+### P3 - Implemented Later (continued)
+23. Kotlin Multiplatform support: per-target Analysis API sessions (JVM, Android, iOS/Native, JS), KMP detection, per-target classpath resolution, expect/actual navigation, per-file platform indicator (ADR-24) — added in 0.70.0
 
 ### Explicitly Out of Scope
 - Snippet completion, code generation, refactoring (extract method/variable)
