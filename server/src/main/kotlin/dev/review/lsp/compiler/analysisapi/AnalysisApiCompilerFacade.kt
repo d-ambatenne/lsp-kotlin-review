@@ -92,7 +92,7 @@ class AnalysisApiCompilerFacade(
 
     private fun buildSession(): org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession {
         // Deduplicate classpath jars across all modules
-        val rawClasspath = projectModel.modules.flatMap { it.classpath }.distinct()
+        val rawClasspath = projectModel.modules.flatMap { it.classpath + it.testClasspath }.distinct()
 
         // Extract classes.jar from AAR files (Android Archive bundles)
         val allClasspath = rawClasspath.flatMap { entry ->
@@ -130,7 +130,7 @@ class AnalysisApiCompilerFacade(
                 // The standalone Analysis API doesn't support inter-module dependencies
                 // without complex dependency graph wiring. A single merged module gives
                 // full cross-module navigation/completion for code review purposes.
-                val allSourceRoots = projectModel.modules.flatMap { it.sourceRoots }.distinct()
+                val allSourceRoots = projectModel.modules.flatMap { it.sourceRoots + it.testSourceRoots }.distinct()
                 addModule(buildKtSourceModule {
                     moduleName = projectModel.modules.firstOrNull()?.name ?: "sources"
                     this.platform = JvmPlatforms.defaultJvmPlatform
