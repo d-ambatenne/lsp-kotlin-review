@@ -308,7 +308,7 @@ class GradleProvider : BuildSystemProvider {
             val outputStream = java.io.ByteArrayOutputStream()
             connection.newBuild()
                 .forTasks("lspResolveClasspath")
-                .withArguments("--init-script", initScript.toString(), "-q")
+                .withArguments("--init-script", initScript.toString(), "-q", "--no-configuration-cache")
                 .setStandardOutput(outputStream)
                 .setStandardError(OutputStream.nullOutputStream())
                 .run()
