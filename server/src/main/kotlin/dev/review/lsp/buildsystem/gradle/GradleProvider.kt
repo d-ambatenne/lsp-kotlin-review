@@ -54,18 +54,34 @@ class GradleProvider : BuildSystemProvider {
             if (hasAndroid || anyEmptyClasspath) {
                 try {
                     System.err.println("[gradle] Running init script for classpath resolution (variant=$variant)...")
-                    val resolvedCp = resolveClasspathViaInitScript(connection, workspaceRoot, variant)
+                    val (resolvedCp, resolvedTestCp) = resolveClasspathViaInitScript(connection, workspaceRoot, variant)
                     System.err.println("[gradle] Init script resolved ${resolvedCp.size} modules: ${resolvedCp.map { "${it.key}=${it.value.size}" }}")
+                    if (resolvedTestCp.isNotEmpty()) {
+                        System.err.println("[gradle] Init script resolved test classpath for ${resolvedTestCp.size} modules: ${resolvedTestCp.map { "${it.key}=${it.value.size}" }}")
+                    }
                     modules = modules.map { module ->
+                        var updated = module
+                        // Merge main classpath
                         val cp = resolvedCp[module.name]
                         if (cp != null && cp.isNotEmpty()) {
-                            val existingPaths = module.classpath.map { it.normalize() }.toSet()
+                            val existingPaths = updated.classpath.map { it.normalize() }.toSet()
                             val newEntries = cp.filter { it.normalize() !in existingPaths }
                             System.err.println("[gradle] module '${module.name}': +${newEntries.size} new classpath entries from init script")
                             if (newEntries.isNotEmpty()) {
-                                module.copy(classpath = module.classpath + newEntries)
-                            } else module
-                        } else module
+                                updated = updated.copy(classpath = updated.classpath + newEntries)
+                            }
+                        }
+                        // Merge test classpath
+                        val tcp = resolvedTestCp[module.name]
+                        if (tcp != null && tcp.isNotEmpty()) {
+                            val existingPaths = (updated.classpath + updated.testClasspath).map { it.normalize() }.toSet()
+                            val newEntries = tcp.filter { it.normalize() !in existingPaths }
+                            System.err.println("[gradle] module '${module.name}': +${newEntries.size} new test classpath entries from init script")
+                            if (newEntries.isNotEmpty()) {
+                                updated = updated.copy(testClasspath = updated.testClasspath + newEntries)
+                            }
+                        }
+                        updated
                     }
                 } catch (e: Exception) {
                     System.err.println("[gradle] Init script classpath resolution failed: ${e.message}")
@@ -155,14 +171,21 @@ class GradleProvider : BuildSystemProvider {
         )
     }
 
+    private data class ResolvedClasspaths(
+        val main: Map<String, List<Path>>,
+        val test: Map<String, List<Path>>
+    )
+
     private fun resolveClasspathViaInitScript(
         connection: org.gradle.tooling.ProjectConnection,
         workspaceRoot: Path,
         variant: String = "debug"
-    ): Map<String, List<Path>> {
+    ): ResolvedClasspaths {
         // Write a temporary Gradle init script that resolves the variant's compile classpath
         val initScript = Files.createTempFile("lsp-classpath-", ".gradle")
         val variantCp = "${variant}CompileClasspath"
+        val variantAndroidTestCp = "${variant}AndroidTestCompileClasspath"
+        val variantUnitTestCp = "${variant}UnitTestCompileClasspath"
         try {
             Files.writeString(initScript, """
                 allprojects {
@@ -174,6 +197,7 @@ class GradleProvider : BuildSystemProvider {
                             }
                             println "LSPDBG:" + project.name + ":available=" + compileConfigs.join(",")
 
+                            // --- Main classpath ---
                             def configs = ["$variantCp", "compileClasspath"]
                             // Also try any available compile classpath config as last resort
                             compileConfigs.each { if (!configs.contains(it)) configs.add(it) }
@@ -196,6 +220,21 @@ class GradleProvider : BuildSystemProvider {
                                     println "LSPERR:" + project.name + ":" + configName + ":" + e.message?.take(200)
                                 }
                             }
+
+                            // --- Test classpaths (androidTest + unitTest) ---
+                            def testConfigs = ["$variantAndroidTestCp", "$variantUnitTestCp"]
+                            for (configName in testConfigs) {
+                                def cp = configurations.findByName(configName)
+                                if (cp == null) continue
+                                if (!cp.canBeResolved) continue
+                                try {
+                                    cp.incoming.artifactView { lenient = true }.files.each { file ->
+                                        println "LSPTCP:" + project.name + ":" + file.absolutePath
+                                    }
+                                } catch (e) {
+                                    println "LSPERR:" + project.name + ":test:" + configName + ":" + e.message?.take(200)
+                                }
+                            }
                         }
                     }
                 }
@@ -209,7 +248,8 @@ class GradleProvider : BuildSystemProvider {
                 .setStandardError(OutputStream.nullOutputStream())
                 .run()
 
-            val result = mutableMapOf<String, MutableList<Path>>()
+            val mainResult = mutableMapOf<String, MutableList<Path>>()
+            val testResult = mutableMapOf<String, MutableList<Path>>()
             outputStream.toString().lines().forEach { line ->
                 when {
                     line.startsWith("LSPCP:") -> {
@@ -218,7 +258,17 @@ class GradleProvider : BuildSystemProvider {
                             val moduleName = parts[0]
                             val filePath = Path.of(parts[1])
                             if (Files.exists(filePath)) {
-                                result.getOrPut(moduleName) { mutableListOf() }.add(filePath)
+                                mainResult.getOrPut(moduleName) { mutableListOf() }.add(filePath)
+                            }
+                        }
+                    }
+                    line.startsWith("LSPTCP:") -> {
+                        val parts = line.removePrefix("LSPTCP:").split(":", limit = 2)
+                        if (parts.size == 2) {
+                            val moduleName = parts[0]
+                            val filePath = Path.of(parts[1])
+                            if (Files.exists(filePath)) {
+                                testResult.getOrPut(moduleName) { mutableListOf() }.add(filePath)
                             }
                         }
                     }
@@ -226,7 +276,7 @@ class GradleProvider : BuildSystemProvider {
                     line.startsWith("LSPDBG:") -> System.err.println("[gradle] $line")
                 }
             }
-            return result
+            return ResolvedClasspaths(mainResult, testResult)
         } finally {
             Files.deleteIfExists(initScript)
         }
