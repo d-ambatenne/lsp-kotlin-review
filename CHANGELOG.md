@@ -4,7 +4,7 @@ All notable changes to the Kotlin Review LSP extension will be documented in thi
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.64.0] - 2026-02-26
+## [0.65.0] - 2026-02-26
 
 ### Added
 
@@ -17,6 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Hover on annotated declarations**: hovering on a property like `@Inject lateinit var x: T` showed `@Inject` as the signature — now correctly shows `lateinit var x: T`
 - **Stacked/multi-line annotations**: signature extraction now uses declaration keyword matching to reliably skip annotation blocks, including multi-line annotations with parameters (e.g. `@Named(\n  value = "x"\n)`)
+
+### Improved
+
+- **Debounced file watcher rebuilds**: build file and generated source changes are now debounced with a 2-second window — rapid changes (e.g. KSP generating 50 files) coalesce into a single session rebuild instead of triggering one per file
 
 ## [0.45.0] - 2026-02-23
 

@@ -31,6 +31,7 @@
 19. Hover annotation fix: skip leading annotations in signature extraction, handle multi-line annotations — added in 0.60.0
 20. Test source set support: androidTest + unit test files in analysis session, test classpath resolution via init script — added in 0.62.0
 21. Annotation hover: resolve to annotation class (not constructor), show `annotation class <FQN>` — added in 0.64.0
+22. Debounced file watcher rebuilds (2s window) to batch rapid generated source changes — added in 0.65.0
 
 ### Explicitly Out of Scope
 - Snippet completion, code generation, refactoring (extract method/variable)

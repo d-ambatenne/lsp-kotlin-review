@@ -189,8 +189,8 @@ lsp-kotlin-review/
 4. `textDocument/didChange` → update file content in map, debounced diagnostics (250ms, runs on stale session)
 5. `textDocument/didSave` → rebuild analysis session from disk, re-publish diagnostics
 6. `textDocument/didClose` → clear diagnostics, remove version tracking
-6. `workspace/didChangeWatchedFiles` → if build file changed, rebuild session (re-resolve ProjectModel, dispose old facade, create new facade, rewire providers)
-7. `shutdown` → dispose analysis session, shut down debounce scheduler, cancel coroutine scope
+6. `workspace/didChangeWatchedFiles` → if build file or generated source changed, schedule debounced rebuild (2s window — rapid changes coalesce into one rebuild)
+7. `shutdown` → cancel pending rebuilds, dispose analysis session, shut down debounce schedulers, cancel coroutine scope
 8. `exit` → terminate JVM
 
 ### 3. Build System Integration (`server/.../buildsystem/`)
@@ -254,10 +254,11 @@ Detection logic:
 | `BazelProvider` | `WORKSPACE`, `WORKSPACE.bazel`, `MODULE.bazel` | Shell out to `bazel query` + `bazel cquery` for deps | **future** |
 | `ManualProvider` | *(fallback)* | Scan for `src/main/kotlin`, `src/main/java`, `src/test/kotlin`, `src/kotlin`, `src`. No classpath. | **Implemented** |
 
-**Session rebuild on build file changes:**
-- `KotlinLanguageServer` registers file watchers for `**/build.gradle.kts`, `**/build.gradle`, `**/settings.gradle.kts`, `**/settings.gradle`
-- `KotlinWorkspaceService.didChangeWatchedFiles` detects build file changes and invokes a callback
-- Callback re-resolves ProjectModel via `BuildSystemResolver`, calls `AnalysisSession.rebuild(newModel)`, and rewires all providers with the new facade
+**Session rebuild on build file / generated source changes:**
+- `KotlinLanguageServer` registers file watchers for `**/build.gradle.kts`, `**/build.gradle`, `**/settings.gradle.kts`, `**/settings.gradle`, `**/build/generated/**/*.kt`, `**/build/generated/**/*.java`
+- `KotlinWorkspaceService.didChangeWatchedFiles` detects build file or generated source changes and invokes a callback
+- Callback schedules a debounced rebuild (2-second window via `ScheduledExecutorService`) — rapid changes (e.g. KSP generating 50 files) coalesce into a single rebuild
+- Rebuild re-resolves ProjectModel via `BuildSystemResolver`, calls `AnalysisSession.rebuild(newModel)`, and rewires all providers with the new facade
 
 ### 4. CompilerFacade Abstraction (`server/.../compiler/`)
 
@@ -461,9 +462,13 @@ Each provider receives `CompilerFacade` injected via `KotlinTextDocumentService.
 │  Executors.newSingleThreadExecutor      │    all analyze {} blocks serialized
 │  Named "kotlin-analysis"                │
 ├─────────────────────────────────────────┤
-│  Debounce scheduler thread              │  ← didChange → delayed diagnostics
+│  Diagnostics debounce thread            │  ← didChange → delayed diagnostics
 │  ScheduledExecutorService               │    250ms debounce, cancellable
 │  Named "diagnostics-debounce"           │
+├─────────────────────────────────────────┤
+│  Rebuild debounce thread                │  ← file watcher → delayed rebuild
+│  ScheduledExecutorService               │    2s debounce, cancellable
+│  Named "rebuild-debounce"              │
 ├─────────────────────────────────────────┤
 │  Coroutine scope (Dispatchers.Default)  │  ← initialization, session rebuild
 │  Build system resolution, session setup │
