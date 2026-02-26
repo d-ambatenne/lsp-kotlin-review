@@ -417,13 +417,12 @@ class AnalysisApiCompilerFacade(
     // ==== CompilerFacade implementation ====
 
     override fun getDiagnostics(file: Path): List<DiagnosticInfo> {
+        // Skip diagnostics for KMP projects — the K2 FIR diagnostic pipeline crashes
+        // (FirIncompatibleClassExpressionChecker null source) when multiplatform code is
+        // analyzed with JvmPlatforms fallback. Hover/navigation/completion still work.
+        if (projectModel.isMultiplatform) return emptyList()
         val ktFile = findKtFile(file) ?: return emptyList()
-        // Use common-only checkers for KMP projects to avoid JVM-specific checkers
-        // crashing on multiplatform code analyzed with JvmPlatforms fallback
-        val checkerFilter = if (projectModel.isMultiplatform)
-            KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS
-        else
-            KaDiagnosticCheckerFilter.EXTENDED_AND_COMMON_CHECKERS
+        val checkerFilter = KaDiagnosticCheckerFilter.EXTENDED_AND_COMMON_CHECKERS
         return try {
             runOnAnalysisThread {
                 analyze(ktFile) {
