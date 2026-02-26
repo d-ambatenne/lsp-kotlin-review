@@ -180,6 +180,9 @@ class GradleProvider : BuildSystemProvider {
         // Detect KMP module
         val isKmp = detectKmp(moduleDir)
         val kmpTargets = if (isKmp && moduleDir != null) resolveKmpTargets(moduleDir) else emptyList()
+        if (isKmp) {
+            System.err.println("[gradle] module '${ideaModule.name}': KMP detected, targets=${kmpTargets.map { "${it.name}(${it.platform})" }}")
+        }
 
         // Android modules often don't report source dirs through IdeaModule.
         // Fall back to conventional Android source directory layout.
@@ -425,13 +428,21 @@ class GradleProvider : BuildSystemProvider {
     private fun detectKmp(moduleDir: Path?): Boolean {
         if (moduleDir == null) return false
 
+        // Primary: check for commonMain source set directory (definitive KMP indicator)
+        if (Files.isDirectory(moduleDir.resolve("src/commonMain/kotlin")) ||
+            Files.isDirectory(moduleDir.resolve("src/commonMain/java"))) {
+            return true
+        }
+
+        // Secondary: scan build.gradle for KMP plugin declarations
         for (buildFile in listOf("build.gradle.kts", "build.gradle")) {
             val path = moduleDir.resolve(buildFile)
             if (Files.exists(path)) {
                 val content = try { Files.readString(path) } catch (_: Exception) { continue }
                 if (content.contains("kotlin(\"multiplatform\")") ||
                     content.contains("org.jetbrains.kotlin.multiplatform") ||
-                    content.contains("id(\"org.jetbrains.kotlin.multiplatform\")")) {
+                    content.contains("id(\"org.jetbrains.kotlin.multiplatform\")") ||
+                    content.contains("kotlinMultiplatform")) {
                     return true
                 }
             }
