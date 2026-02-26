@@ -10,6 +10,9 @@ import org.eclipse.lsp4j.services.*
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 class KotlinLanguageServer : LanguageServer, LanguageClientAware {
 
@@ -21,6 +24,13 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
     private var analysisSession: AnalysisSession? = null
     private var buildVariant: String = "debug"
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val rebuildScheduler = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "rebuild-debounce").apply { isDaemon = true }
+    }
+    @Volatile private var pendingRebuild: ScheduledFuture<*>? = null
+    private companion object {
+        const val REBUILD_DEBOUNCE_MS = 2000L // 2s — batches burst of generated file events
+    }
 
     override fun initialize(params: InitializeParams): CompletableFuture<InitializeResult> {
         workspaceRoot = params.rootUri ?: params.rootPath
@@ -69,10 +79,10 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
                 val publisher = DiagnosticsPublisher(session.facade, c)
                 textDocumentService.setAnalysis(session.facade, publisher, model.projectDir)
 
-                // Wire up workspace service callbacks
-                workspaceService.onBuildFileChanged = { rebuildSession() }
-                workspaceService.onGeneratedSourcesChanged = { rebuildSession() }
-                workspaceService.onConfigurationChanged = { rebuildSession() }
+                // Wire up workspace service callbacks — debounced to batch rapid changes
+                workspaceService.onBuildFileChanged = { scheduleRebuild() }
+                workspaceService.onGeneratedSourcesChanged = { scheduleRebuild() }
+                workspaceService.onConfigurationChanged = { scheduleRebuild() }
 
                 log(MessageType.Info, "Analysis session ready (${model.modules.size} module(s))")
 
@@ -129,6 +139,13 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
         }
     }
 
+    private fun scheduleRebuild() {
+        pendingRebuild?.cancel(false)
+        pendingRebuild = rebuildScheduler.schedule({
+            rebuildSession()
+        }, REBUILD_DEBOUNCE_MS, TimeUnit.MILLISECONDS)
+    }
+
     private fun rebuildSession() {
         val rp = rootPath ?: return
         scope.launch {
@@ -154,6 +171,8 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
     }
 
     override fun shutdown(): CompletableFuture<Any> {
+        pendingRebuild?.cancel(false)
+        rebuildScheduler.shutdownNow()
         textDocumentService.shutdown()
         analysisSession?.dispose()
         scope.cancel()
