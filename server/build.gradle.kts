@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "dev.review"
-version = "0.58.0"
+version = "0.59.0"
 
 val kotlinVersion = "2.1.0"
 
@@ -143,10 +143,52 @@ tasks.shadowJar {
 }
 
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags("integration", "e2e")
+    }
     jvmArgs(
         "--add-opens=java.base/java.lang=ALL-UNNAMED",
         "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
         "--add-opens=java.base/java.io=ALL-UNNAMED"
     )
+}
+
+tasks.register<Test>("integrationTest") {
+    description = "Run integration tests with real Analysis API"
+    group = "verification"
+    dependsOn(tasks.shadowJar)
+    useJUnitPlatform {
+        includeTags("integration")
+    }
+    jvmArgs(
+        "-Xmx2g",
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+        "--add-opens=java.base/java.io=ALL-UNNAMED"
+    )
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    // Use shadow JAR for classpath — the Analysis API needs merged resources
+    // (extensions/compiler.xml) that are only available in the fat JAR
+    classpath = files(tasks.shadowJar.get().archiveFile) +
+        sourceSets.test.get().output +
+        configurations.testRuntimeClasspath.get().filter { !it.name.startsWith("server") }
+}
+
+tasks.register<Test>("e2eTest") {
+    description = "Run E2E LSP protocol tests"
+    group = "verification"
+    dependsOn(tasks.shadowJar)
+    useJUnitPlatform {
+        includeTags("e2e")
+    }
+    jvmArgs(
+        "-Xmx2g",
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+        "--add-opens=java.base/java.io=ALL-UNNAMED"
+    )
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    // Pass shadow JAR path as system property for E2E tests
+    systemProperty("server.jar", tasks.shadowJar.get().archiveFile.get().asFile.absolutePath)
 }

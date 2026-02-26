@@ -270,6 +270,17 @@ class AnalysisApiCompilerFacade(
         }
     } catch (_: Exception) { null }
 
+    /**
+     * Extract the declaration signature line from PSI text, skipping leading
+     * annotation-only lines.  e.g. "@Inject\nlateinit var x: T" → "lateinit var x: T"
+     */
+    private fun extractSignatureLine(psiText: String): String? {
+        val lines = psiText.lines()
+        return (lines.firstOrNull { it.trim().let { t -> t.isNotEmpty() && !t.startsWith("@") } }
+            ?: lines.firstOrNull())
+            ?.trim()?.take(120)
+    }
+
     /** Render a KaType to a clean Kotlin-syntax string with short names. */
     private fun renderType(type: KaType): String {
         val base = when (type) {
@@ -354,12 +365,12 @@ class AnalysisApiCompilerFacade(
                             val loc = psiToSourceLocation(psi) ?: return@analyze null
                             ResolvedSymbol(
                                 name = (psi as? KtNamedDeclaration)?.name
-                                    ?: psiText.lines().firstOrNull()?.trim()?.take(40)
+                                    ?: extractSignatureLine(psiText)?.take(40)
                                     ?: "unknown",
                                 kind = mapKaSymbolKind(symbol),
                                 location = loc,
                                 containingClass = (psi.parent as? KtClassOrObject)?.name,
-                                signature = psiText.lines().firstOrNull()?.take(120),
+                                signature = extractSignatureLine(psiText),
                                 fqName = null
                             )
                         } else {
@@ -409,7 +420,7 @@ class AnalysisApiCompilerFacade(
                             kind = kind,
                             location = loc,
                             containingClass = (decl.parent as? KtClassOrObject)?.name,
-                            signature = signature ?: decl.text?.lines()?.firstOrNull()?.take(120),
+                            signature = signature ?: decl.text?.let { extractSignatureLine(it) },
                             fqName = (decl as? KtNamedDeclaration)?.fqName?.asString()
                         )
                     } else null
