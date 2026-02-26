@@ -359,11 +359,42 @@ class AnalysisApiCompilerFacade(
             runOnAnalysisThread {
                 val element = findElementAt(ktFile, line, column)
                     ?: return@runOnAnalysisThread null
+                // Handle annotation entries first — resolve to the annotation CLASS, not its constructor.
+                // Check element itself and walk up a few levels (annotation PSI tree is 4-5 deep).
+                val annotationEntry = run {
+                    var cur: com.intellij.psi.PsiElement? = element
+                    repeat(6) {
+                        if (cur is KtAnnotationEntry) return@run cur as KtAnnotationEntry
+                        cur = cur?.parent
+                    }
+                    null
+                }
+                if (annotationEntry != null) {
+                    val result = try {
+                        analyze(annotationEntry) {
+                            val type = annotationEntry.typeReference?.type as? KaClassType
+                                ?: return@analyze null
+                            val classSymbol = type.symbol as? KaClassSymbol
+                                ?: return@analyze null
+                            val sig = renderSyntheticSignature(classSymbol)
+                            val name = classSymbol.classId?.shortClassName?.asString() ?: "unknown"
+                            val psi = try { classSymbol.psi } catch (_: Exception) { null }
+                            val loc = psi?.let { psiToSourceLocation(it) }
+                            ResolvedSymbol(
+                                name = name,
+                                kind = mapKaSymbolKind(classSymbol),
+                                location = loc ?: SourceLocation(file, line, column),
+                                containingClass = null,
+                                signature = sig,
+                                fqName = classSymbol.classId?.asFqNameString()
+                            )
+                        }
+                    } catch (_: Exception) { null }
+                    if (result != null) return@runOnAnalysisThread result
+                }
+
                 val ref = element as? KtReferenceExpression
                     ?: (element.parent as? KtReferenceExpression)
-                    // When hovering on '@' of an annotation, extract the type reference inside it
-                    ?: ((element as? KtAnnotationEntry) ?: (element.parent as? KtAnnotationEntry))
-                        ?.let { (it.typeReference?.typeElement as? KtUserType)?.referenceExpression }
                 if (ref != null) {
                     analyze(ref) {
                         val allRefs = ref.references
