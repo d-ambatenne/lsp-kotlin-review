@@ -190,6 +190,26 @@ class GradleProvider : BuildSystemProvider {
             addConventionalSourceRoots(moduleDir, sourceRoots, testSourceRoots)
         }
 
+        // KMP modules: add commonMain/commonTest to module-level source roots
+        // so they're available to all target sessions
+        if (isKmp && moduleDir != null) {
+            val existingPaths = (sourceRoots + testSourceRoots).map { it.normalize() }.toSet()
+            val commonMainDirs = listOf("src/commonMain/kotlin", "src/commonMain/java")
+            val commonTestDirs = listOf("src/commonTest/kotlin", "src/commonTest/java")
+            for (dir in commonMainDirs) {
+                val path = moduleDir.resolve(dir)
+                if (Files.isDirectory(path) && path.normalize() !in existingPaths) {
+                    sourceRoots.add(path)
+                }
+            }
+            for (dir in commonTestDirs) {
+                val path = moduleDir.resolve(dir)
+                if (Files.isDirectory(path) && path.normalize() !in existingPaths) {
+                    testSourceRoots.add(path)
+                }
+            }
+        }
+
         if (isAndroid && moduleDir != null) {
             // Add android.jar if not already in classpath
             if (classpath.none { it.fileName.toString() == "android.jar" }) {
