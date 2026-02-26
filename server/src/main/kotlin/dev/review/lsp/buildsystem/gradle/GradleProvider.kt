@@ -239,7 +239,9 @@ class GradleProvider : BuildSystemProvider {
                     task lspResolveClasspath {
                         doLast {
                             // List all resolvable compile-related configurations
-                            def compileConfigs = configurations.names.findAll {
+                            // Use project.configurations explicitly — Gradle 8.14+ doesn't resolve
+                            // bare 'configurations' inside doLast to the project scope
+                            def compileConfigs = project.configurations.names.findAll {
                                 it.toLowerCase().contains("compileclasspath")
                             }
                             println "LSPDBG:" + project.name + ":available=" + compileConfigs.join(",")
@@ -250,7 +252,7 @@ class GradleProvider : BuildSystemProvider {
                             compileConfigs.each { if (!configs.contains(it)) configs.add(it) }
 
                             for (configName in configs) {
-                                def cp = configurations.findByName(configName)
+                                def cp = project.configurations.findByName(configName)
                                 if (cp == null) continue
                                 if (!cp.canBeResolved) {
                                     println "LSPDBG:" + project.name + ":" + configName + "=not-resolvable"
@@ -271,7 +273,7 @@ class GradleProvider : BuildSystemProvider {
                             // --- Test classpaths (androidTest + unitTest) ---
                             def testConfigs = ["$variantAndroidTestCp", "$variantUnitTestCp"]
                             for (configName in testConfigs) {
-                                def cp = configurations.findByName(configName)
+                                def cp = project.configurations.findByName(configName)
                                 if (cp == null) continue
                                 if (!cp.canBeResolved) continue
                                 try {
@@ -284,11 +286,11 @@ class GradleProvider : BuildSystemProvider {
                             }
 
                             // --- KMP per-target classpaths ---
-                            def kmpConfigs = configurations.names.findAll {
+                            def kmpConfigs = project.configurations.names.findAll {
                                 it.matches(/^(jvm|android|ios|js|wasmJs|native|linux|macos|mingw).*[Cc]ompile[Cc]lasspath$/)
                             }
                             for (configName in kmpConfigs) {
-                                def cp = configurations.findByName(configName)
+                                def cp = project.configurations.findByName(configName)
                                 if (cp == null || !cp.canBeResolved) continue
                                 try {
                                     cp.incoming.artifactView { lenient = true }.files.each { file ->
