@@ -159,15 +159,11 @@ class AnalysisApiCompilerFacade(
         val byPlatform = kmpTargets.groupBy { it.platform }
 
         return byPlatform.map { (platform, targets) ->
-            // Use JvmPlatforms for all targets — JsPlatforms/NativePlatforms may not be
-            // available from the standalone Analysis API dependencies.
-            // TODO: Use JsPlatforms.defaultJsPlatform and NativePlatforms.unspecifiedNativePlatform
-            //       when those classes are confirmed available on the classpath.
             val platformType = when (platform) {
                 KmpPlatform.JVM -> JvmPlatforms.defaultJvmPlatform
                 KmpPlatform.ANDROID -> JvmPlatforms.defaultJvmPlatform
-                KmpPlatform.JS -> JvmPlatforms.defaultJvmPlatform
-                KmpPlatform.NATIVE -> JvmPlatforms.defaultJvmPlatform
+                KmpPlatform.JS -> org.jetbrains.kotlin.platform.js.JsPlatforms.defaultJsPlatform
+                KmpPlatform.NATIVE -> org.jetbrains.kotlin.platform.konan.NativePlatforms.unspecifiedNativePlatform
             }
 
             // Source roots: module-level roots + target-specific roots
@@ -417,12 +413,13 @@ class AnalysisApiCompilerFacade(
     // ==== CompilerFacade implementation ====
 
     override fun getDiagnostics(file: Path): List<DiagnosticInfo> {
-        // Skip diagnostics for KMP projects — the K2 FIR diagnostic pipeline crashes
-        // (FirIncompatibleClassExpressionChecker null source) when multiplatform code is
-        // analyzed with JvmPlatforms fallback. Hover/navigation/completion still work.
-        if (projectModel.isMultiplatform) return emptyList()
         val ktFile = findKtFile(file) ?: return emptyList()
-        val checkerFilter = KaDiagnosticCheckerFilter.EXTENDED_AND_COMMON_CHECKERS
+        // Use common-only checkers for KMP projects to reduce false positives
+        // from platform-specific checkers running on cross-platform code
+        val checkerFilter = if (projectModel.isMultiplatform)
+            KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS
+        else
+            KaDiagnosticCheckerFilter.EXTENDED_AND_COMMON_CHECKERS
         return try {
             runOnAnalysisThread {
                 analyze(ktFile) {
