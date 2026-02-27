@@ -90,7 +90,7 @@ class AnalysisApiCompilerFacade(
 
     /** Find a specific version of kotlin-stdlib JAR from the Gradle cache. */
     private fun findKotlinStdlibJar(existingClasspath: List<Path>, targetVersion: String): Path? {
-        val gradleHome = Path.of(System.getProperty("user.home"), ".gradle")
+        val gradleHome = Path.of(System.getProperty("user.home")).resolve(".gradle")
         val stdlibDir = gradleHome.resolve("caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib")
         if (java.nio.file.Files.isDirectory(stdlibDir)) {
             val versionDir = stdlibDir.resolve(targetVersion)
@@ -102,7 +102,7 @@ class AnalysisApiCompilerFacade(
                             name == "kotlin-stdlib-$targetVersion.jar"
                         }.findFirst().orElse(null)
                     }
-                    if (jar != null) return jar
+                    if (jar != null) return jar.toAbsolutePath()
                 } catch (_: Exception) { /* continue */ }
             }
         }
@@ -123,7 +123,7 @@ class AnalysisApiCompilerFacade(
                             name == "kotlin-stdlib-$targetVersion.jar"
                         }.findFirst().orElse(null)
                     }
-                    if (jar != null) return jar
+                    if (jar != null) return jar.toAbsolutePath()
                 } catch (_: Exception) { /* continue */ }
             }
         }
@@ -160,16 +160,16 @@ class AnalysisApiCompilerFacade(
         }
         val effectiveClasspath = if (existingStdlib != null && !existingStdlib.fileName.toString().contains(analysisApiKotlinVersion)) {
             // Stdlib version mismatch — find our compatible version
-            val compatibleStdlib = findKotlinStdlibJar(classpathJars, analysisApiKotlinVersion)
+            val compatibleStdlib = findKotlinStdlibJar(classpathJars, analysisApiKotlinVersion)?.toAbsolutePath()
             if (compatibleStdlib != null) {
-                System.err.println("[session] Replacing kotlin-stdlib ${existingStdlib.fileName} with compatible $analysisApiKotlinVersion version: ${compatibleStdlib.fileName}")
+                System.err.println("[session] Replacing kotlin-stdlib ${existingStdlib.fileName} with compatible $analysisApiKotlinVersion version: $compatibleStdlib")
                 classpathJars.filter { it != existingStdlib } + compatibleStdlib
             } else {
                 System.err.println("[session] WARNING: kotlin-stdlib version mismatch (${existingStdlib.fileName} vs Analysis API $analysisApiKotlinVersion) but no compatible version found")
                 classpathJars
             }
         } else if (existingStdlib == null) {
-            val stdlibJar = findKotlinStdlibJar(classpathJars, analysisApiKotlinVersion)
+            val stdlibJar = findKotlinStdlibJar(classpathJars, analysisApiKotlinVersion)?.toAbsolutePath()
             if (stdlibJar != null) {
                 System.err.println("[session] kotlin-stdlib not in classpath, adding: $stdlibJar")
                 classpathJars + stdlibJar
