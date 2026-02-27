@@ -106,7 +106,10 @@ class GradleProvider : BuildSystemProvider {
                                         }
                                     }
                                     if (newEntries.isNotEmpty()) {
-                                        System.err.println("[gradle] module '${module.name}': KMP target '${target.name}' +${newEntries.size} classpath entries")
+                                        val jars = newEntries.count { it.toString().endsWith(".jar") }
+                                        val klibs = newEntries.count { it.toString().endsWith(".klib") }
+                                        val other = newEntries.size - jars - klibs
+                                        System.err.println("[gradle] module '${module.name}': KMP target '${target.name}' +${newEntries.size} classpath entries ($jars JARs, $klibs klibs${if (other > 0) ", $other other" else ""})")
                                         target.copy(classpath = target.classpath + newEntries)
                                     } else {
                                         target
@@ -310,7 +313,7 @@ class GradleProvider : BuildSystemProvider {
 
                             // --- KMP per-target classpaths ---
                             def kmpConfigs = project.configurations.names.findAll {
-                                it.matches(/^(jvm|android|ios|js|wasmJs|native|linux|macos|mingw).*[Cc]ompile[Cc]lasspath$/)
+                                it.matches(/^(jvm|android|ios|js|wasmJs|native|linux|macos|mingw|metadata).*[Cc]ompile[Cc]lasspath$/)
                             }
                             for (configName in kmpConfigs) {
                                 def cp = project.configurations.findByName(configName)
@@ -392,6 +395,15 @@ class GradleProvider : BuildSystemProvider {
             lower.startsWith("android") || lower.startsWith("debug") || lower.startsWith("release") -> KmpPlatform.ANDROID
             lower.startsWith("ios") || lower.startsWith("native") || lower.startsWith("linux") || lower.startsWith("macos") || lower.startsWith("mingw") -> KmpPlatform.NATIVE
             lower.startsWith("js") || lower.startsWith("wasmjs") -> KmpPlatform.JS
+            // metadata* configs: map by the target name embedded in the config
+            lower.startsWith("metadata") -> when {
+                lower.contains("ios") || lower.contains("apple") || lower.contains("native") -> KmpPlatform.NATIVE
+                lower.contains("js") || lower.contains("wasm") -> KmpPlatform.JS
+                lower.contains("jvm") -> KmpPlatform.JVM
+                lower.contains("android") -> KmpPlatform.ANDROID
+                lower.contains("common") -> KmpPlatform.JVM // common metadata → route to primary (JVM)
+                else -> null
+            }
             else -> null
         }
     }
