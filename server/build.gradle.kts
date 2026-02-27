@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "dev.review"
-version = "0.90.0"
+version = "0.91.0"
 
 val kotlinVersion = "2.3.0"
 

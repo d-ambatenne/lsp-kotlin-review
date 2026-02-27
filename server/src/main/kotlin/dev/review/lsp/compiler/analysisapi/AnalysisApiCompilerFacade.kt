@@ -88,14 +88,32 @@ class AnalysisApiCompilerFacade(
         }
     }
 
+    private val klibStubGenerator = KlibStubGenerator()
+
     private fun buildSingleSession(
         targetPlatform: org.jetbrains.kotlin.platform.TargetPlatform,
         sourceRoots: List<Path>,
         classpathJars: List<Path>,
         includeJdk: Boolean
     ): org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession {
+        // Separate klib files from regular JARs — generate stubs for klibs
+        val klibFiles = classpathJars.filter { it.toString().endsWith(".klib") }
+        val nonKlibEntries = classpathJars.filter { !it.toString().endsWith(".klib") }
+
+        val klibStubRoots = if (klibFiles.isNotEmpty()) {
+            System.err.println("[session] Generating stubs for ${klibFiles.size} klib files...")
+            klibFiles.mapNotNull { klib ->
+                try {
+                    klibStubGenerator.generateStubs(klib)
+                } catch (e: Exception) {
+                    System.err.println("[session] klib stub generation failed for ${klib.fileName}: ${e.message}")
+                    null
+                }
+            }
+        } else emptyList()
+
         // Extract classes.jar from AAR files (Android Archive bundles)
-        val allClasspath = classpathJars.flatMap { entry ->
+        val allClasspath = nonKlibEntries.flatMap { entry ->
             if (entry.toString().endsWith(".aar")) {
                 val extracted = extractClassesFromAar(entry)
                 if (extracted != null) listOf(extracted) else emptyList()
@@ -103,8 +121,8 @@ class AnalysisApiCompilerFacade(
                 listOf(entry)
             }
         }
-        val aarCount = classpathJars.count { it.toString().endsWith(".aar") }
-        System.err.println("[session] Classpath: ${classpathJars.size} entries ($aarCount AARs extracted), ${allClasspath.size} JARs total")
+        val aarCount = nonKlibEntries.count { it.toString().endsWith(".aar") }
+        System.err.println("[session] Classpath: ${nonKlibEntries.size} entries ($aarCount AARs extracted), ${allClasspath.size} JARs total${if (klibStubRoots.isNotEmpty()) ", ${klibStubRoots.size} klib stub roots" else ""}")
 
         return buildStandaloneAnalysisAPISession {
             buildKtModuleProvider {
@@ -135,6 +153,10 @@ class AnalysisApiCompilerFacade(
                     this.platform = targetPlatform
                     for (root in sourceRoots) {
                         addSourceRoot(root)
+                    }
+                    // Add klib-generated stub directories as additional source roots
+                    for (stubRoot in klibStubRoots) {
+                        addSourceRoot(stubRoot)
                     }
                     if (sdkModule != null) {
                         addRegularDependency(sdkModule)
