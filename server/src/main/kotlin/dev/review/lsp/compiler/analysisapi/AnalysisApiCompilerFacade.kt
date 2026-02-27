@@ -88,15 +88,57 @@ class AnalysisApiCompilerFacade(
         }
     }
 
-    /** Find the kotlin-stdlib JAR from the server's own runtime classpath. */
-    private fun findKotlinStdlibJar(): Path? {
-        val classPath = System.getProperty("java.class.path") ?: return null
-        return classPath.split(java.io.File.pathSeparator)
+    /** Find the kotlin-stdlib JAR from the Gradle cache or existing classpath entries. */
+    private fun findKotlinStdlibJar(existingClasspath: List<Path>): Path? {
+        // 1. Check java.class.path (works when not running as shadow JAR)
+        val classPath = System.getProperty("java.class.path") ?: ""
+        val fromCp = classPath.split(java.io.File.pathSeparator)
             .map { Path.of(it) }
             .firstOrNull { p ->
                 val name = p.fileName?.toString() ?: ""
                 name.startsWith("kotlin-stdlib") && name.endsWith(".jar") && !name.contains("test")
             }
+        if (fromCp != null && java.nio.file.Files.exists(fromCp)) return fromCp
+
+        // 2. Search Gradle cache based on existing classpath entries
+        val gradleHome = Path.of(System.getProperty("user.home"), ".gradle")
+        val stdlibDir = gradleHome.resolve("caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib")
+        if (java.nio.file.Files.isDirectory(stdlibDir)) {
+            // Find the latest version (or match project's kotlin version)
+            val kotlinVersion = projectModel.modules.firstOrNull()?.kotlinVersion
+            return try {
+                java.nio.file.Files.walk(stdlibDir, 3).use { stream ->
+                    stream.filter { p ->
+                        val name = p.fileName?.toString() ?: ""
+                        name.startsWith("kotlin-stdlib") && name.endsWith(".jar") && !name.contains("sources") &&
+                            (kotlinVersion == null || p.parent?.parent?.fileName?.toString() == kotlinVersion)
+                    }.findFirst().orElse(null)
+                }
+            } catch (_: Exception) { null }
+        }
+
+        // 3. Look near existing classpath entries for kotlin-stdlib
+        val gradleCacheRoots = existingClasspath.mapNotNull { p ->
+            val str = p.toString()
+            val idx = str.indexOf("/caches/modules-2/files-2.1/")
+            if (idx > 0) Path.of(str.substring(0, idx), "caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib")
+            else null
+        }.distinct()
+        for (root in gradleCacheRoots) {
+            if (java.nio.file.Files.isDirectory(root)) {
+                try {
+                    val jar = java.nio.file.Files.walk(root, 3).use { stream ->
+                        stream.filter { p ->
+                            val name = p.fileName?.toString() ?: ""
+                            name.startsWith("kotlin-stdlib") && name.endsWith(".jar") && !name.contains("sources")
+                        }.findFirst().orElse(null)
+                    }
+                    if (jar != null) return jar
+                } catch (_: Exception) { /* continue */ }
+            }
+        }
+
+        return null
     }
 
     private fun buildSingleSession(
@@ -113,7 +155,7 @@ class AnalysisApiCompilerFacade(
             name.startsWith("kotlin-stdlib") && name.endsWith(".jar")
         }
         val effectiveClasspath = if (!hasStdlib) {
-            val stdlibJar = findKotlinStdlibJar()
+            val stdlibJar = findKotlinStdlibJar(classpathJars)
             if (stdlibJar != null) {
                 System.err.println("[session] kotlin-stdlib not in classpath, adding from server runtime: $stdlibJar")
                 classpathJars + stdlibJar
