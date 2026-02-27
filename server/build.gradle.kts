@@ -1,12 +1,12 @@
 plugins {
-    kotlin("jvm") version "2.1.0"
+    kotlin("jvm") version "2.3.0"
     id("com.gradleup.shadow") version "9.0.0-beta4"
 }
 
 group = "dev.review"
-version = "0.88.0"
+version = "0.90.0"
 
-val kotlinVersion = "2.1.0"
+val kotlinVersion = "2.3.0"
 
 repositories {
     mavenCentral()

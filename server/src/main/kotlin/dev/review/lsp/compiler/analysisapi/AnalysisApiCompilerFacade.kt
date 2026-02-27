@@ -88,98 +88,14 @@ class AnalysisApiCompilerFacade(
         }
     }
 
-    /** Find a specific version of kotlin-stdlib JAR from the Gradle cache. */
-    private fun findKotlinStdlibJar(existingClasspath: List<Path>, targetVersion: String): Path? {
-        val gradleHome = Path.of(System.getProperty("user.home")).resolve(".gradle")
-        val stdlibDir = gradleHome.resolve("caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib")
-        if (java.nio.file.Files.isDirectory(stdlibDir)) {
-            val versionDir = stdlibDir.resolve(targetVersion)
-            if (java.nio.file.Files.isDirectory(versionDir)) {
-                try {
-                    val jar = java.nio.file.Files.walk(versionDir, 2).use { stream ->
-                        stream.filter { p ->
-                            val name = p.fileName?.toString() ?: ""
-                            name == "kotlin-stdlib-$targetVersion.jar"
-                        }.findFirst().orElse(null)
-                    }
-                    if (jar != null) return jar.toAbsolutePath()
-                } catch (_: Exception) { /* continue */ }
-            }
-        }
-
-        // Fallback: search near existing classpath entries
-        val gradleCacheRoots = existingClasspath.mapNotNull { p ->
-            val str = p.toString()
-            val idx = str.indexOf("/caches/modules-2/files-2.1/")
-            if (idx > 0) Path.of(str.substring(0, idx), "caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/$targetVersion")
-            else null
-        }.distinct()
-        for (root in gradleCacheRoots) {
-            if (java.nio.file.Files.isDirectory(root)) {
-                try {
-                    val jar = java.nio.file.Files.walk(root, 2).use { stream ->
-                        stream.filter { p ->
-                            val name = p.fileName?.toString() ?: ""
-                            name == "kotlin-stdlib-$targetVersion.jar"
-                        }.findFirst().orElse(null)
-                    }
-                    if (jar != null) return jar.toAbsolutePath()
-                } catch (_: Exception) { /* continue */ }
-            }
-        }
-
-        return null
-    }
-
     private fun buildSingleSession(
         targetPlatform: org.jetbrains.kotlin.platform.TargetPlatform,
         sourceRoots: List<Path>,
         classpathJars: List<Path>,
         includeJdk: Boolean
     ): org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession {
-        // Ensure kotlin-stdlib is in the classpath — KMP projects may not resolve it
-        // through the standard init script path, and it's needed for basic functions
-        // like .let, .also, kotlin.math.round, padStart, etc.
-        // Ensure a compatible kotlin-stdlib is in the classpath.
-        // The project's stdlib version may not match our Analysis API version (2.1.0),
-        // causing the metadata reader to fail silently. Replace with our version.
-        val analysisApiKotlinVersion = "2.1.0"
-        val existingStdlib = classpathJars.firstOrNull { p ->
-            val name = p.fileName?.toString() ?: ""
-            name.startsWith("kotlin-stdlib") && name.endsWith(".jar") && !name.contains("test") && !name.contains("source")
-        }
-        val effectiveClasspath = if (existingStdlib != null && !existingStdlib.fileName.toString().contains(analysisApiKotlinVersion)) {
-            // Stdlib version mismatch — find our compatible version
-            val compatibleStdlib = findKotlinStdlibJar(classpathJars, analysisApiKotlinVersion)?.toAbsolutePath()
-            if (compatibleStdlib != null) {
-                // The Analysis API's VFS resolves kotlin-stdlib by filename at the working
-                // directory. Copy the compatible stdlib there so it's always found.
-                val workDir = Path.of(System.getProperty("user.dir"))
-                val localStdlib = workDir.resolve("kotlin-stdlib-$analysisApiKotlinVersion.jar")
-                if (!java.nio.file.Files.exists(localStdlib)) {
-                    java.nio.file.Files.copy(compatibleStdlib, localStdlib)
-                }
-                System.err.println("[session] Replacing kotlin-stdlib ${existingStdlib.fileName} with compatible $analysisApiKotlinVersion version: $localStdlib")
-                classpathJars.filter { it != existingStdlib } + localStdlib
-            } else {
-                System.err.println("[session] WARNING: kotlin-stdlib version mismatch (${existingStdlib.fileName} vs Analysis API $analysisApiKotlinVersion) but no compatible version found")
-                classpathJars
-            }
-        } else if (existingStdlib == null) {
-            val stdlibJar = findKotlinStdlibJar(classpathJars, analysisApiKotlinVersion)?.toAbsolutePath()
-            if (stdlibJar != null) {
-                val workDir = Path.of(System.getProperty("user.dir"))
-                val localStdlib = workDir.resolve("kotlin-stdlib-$analysisApiKotlinVersion.jar")
-                if (!java.nio.file.Files.exists(localStdlib)) {
-                    java.nio.file.Files.copy(stdlibJar, localStdlib)
-                }
-                System.err.println("[session] kotlin-stdlib not in classpath, adding: $localStdlib")
-                classpathJars + localStdlib
-            } else classpathJars
-        } else classpathJars
-
         // Extract classes.jar from AAR files (Android Archive bundles)
-        val allClasspath = effectiveClasspath.flatMap { entry ->
+        val allClasspath = classpathJars.flatMap { entry ->
             if (entry.toString().endsWith(".aar")) {
                 val extracted = extractClassesFromAar(entry)
                 if (extracted != null) listOf(extracted) else emptyList()
