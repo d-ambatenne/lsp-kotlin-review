@@ -88,14 +88,40 @@ class AnalysisApiCompilerFacade(
         }
     }
 
+    /** Find the kotlin-stdlib JAR from the server's own runtime classpath. */
+    private fun findKotlinStdlibJar(): Path? {
+        val classPath = System.getProperty("java.class.path") ?: return null
+        return classPath.split(java.io.File.pathSeparator)
+            .map { Path.of(it) }
+            .firstOrNull { p ->
+                val name = p.fileName?.toString() ?: ""
+                name.startsWith("kotlin-stdlib") && name.endsWith(".jar") && !name.contains("test")
+            }
+    }
+
     private fun buildSingleSession(
         targetPlatform: org.jetbrains.kotlin.platform.TargetPlatform,
         sourceRoots: List<Path>,
         classpathJars: List<Path>,
         includeJdk: Boolean
     ): org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession {
+        // Ensure kotlin-stdlib is in the classpath — KMP projects may not resolve it
+        // through the standard init script path, and it's needed for basic functions
+        // like .let, .also, kotlin.math.round, padStart, etc.
+        val hasStdlib = classpathJars.any { p ->
+            val name = p.fileName?.toString() ?: ""
+            name.startsWith("kotlin-stdlib") && name.endsWith(".jar")
+        }
+        val effectiveClasspath = if (!hasStdlib) {
+            val stdlibJar = findKotlinStdlibJar()
+            if (stdlibJar != null) {
+                System.err.println("[session] kotlin-stdlib not in classpath, adding from server runtime: $stdlibJar")
+                classpathJars + stdlibJar
+            } else classpathJars
+        } else classpathJars
+
         // Extract classes.jar from AAR files (Android Archive bundles)
-        val allClasspath = classpathJars.flatMap { entry ->
+        val allClasspath = effectiveClasspath.flatMap { entry ->
             if (entry.toString().endsWith(".aar")) {
                 val extracted = extractClassesFromAar(entry)
                 if (extracted != null) listOf(extracted) else emptyList()
