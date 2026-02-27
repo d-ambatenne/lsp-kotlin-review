@@ -312,8 +312,14 @@ class GradleProvider : BuildSystemProvider {
                             }
 
                             // --- KMP per-target classpaths ---
+                            // Match compile classpaths + klib compilations for native/JS targets
                             def kmpConfigs = project.configurations.names.findAll {
-                                it.matches(/^(jvm|android|ios|js|wasmJs|native|linux|macos|mingw|metadata).*[Cc]ompile[Cc]lasspath$/)
+                                it.matches(/^(jvm|android|ios|js|wasmJs|native|linux|macos|mingw|metadata).*[Cc]ompile[Cc]lasspath$/) ||
+                                it.matches(/^(ios|native|linux|macos|mingw).*[Cc]ompile[Kk]libraries$/) ||
+                                it.matches(/^(ios|js|wasmJs).*[Mm]ain[Aa]pi$/)
+                            }
+                            if (kmpConfigs.size() > 0) {
+                                println "LSPDBG:" + project.name + ":kmpConfigs=" + kmpConfigs.join(",")
                             }
                             for (configName in kmpConfigs) {
                                 def cp = project.configurations.findByName(configName)

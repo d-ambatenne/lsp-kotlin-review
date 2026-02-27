@@ -88,8 +88,6 @@ class AnalysisApiCompilerFacade(
         }
     }
 
-    private val klibStubGenerator = KlibStubGenerator()
-
     private fun buildSingleSession(
         targetPlatform: org.jetbrains.kotlin.platform.TargetPlatform,
         sourceRoots: List<Path>,
@@ -101,10 +99,11 @@ class AnalysisApiCompilerFacade(
         val nonKlibEntries = classpathJars.filter { !it.toString().endsWith(".klib") }
 
         val klibStubRoots = if (klibFiles.isNotEmpty()) {
+            val stubGen = KlibStubGenerator()
             System.err.println("[session] Generating stubs for ${klibFiles.size} klib files...")
             klibFiles.mapNotNull { klib ->
                 try {
-                    klibStubGenerator.generateStubs(klib)
+                    stubGen.generateStubs(klib)
                 } catch (e: Exception) {
                     System.err.println("[session] klib stub generation failed for ${klib.fileName}: ${e.message}")
                     null
