@@ -2,7 +2,7 @@
   "name": "kotlin-review",
   "displayName": "Kotlin Review",
   "description": "Kotlin language support for code review and small changes",
-  "version": "0.77.0",
+  "version": "0.78.0",
   "publisher": "kotlin-review",
   "license": "Apache-2.0",
   "icon": "icon.png",

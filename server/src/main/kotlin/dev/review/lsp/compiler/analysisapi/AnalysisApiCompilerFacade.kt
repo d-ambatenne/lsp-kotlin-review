@@ -414,12 +414,7 @@ class AnalysisApiCompilerFacade(
 
     override fun getDiagnostics(file: Path): List<DiagnosticInfo> {
         val ktFile = findKtFile(file) ?: return emptyList()
-        // Use common-only checkers for KMP projects to reduce false positives
-        // from platform-specific checkers running on cross-platform code
-        val checkerFilter = if (projectModel.isMultiplatform)
-            KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS
-        else
-            KaDiagnosticCheckerFilter.EXTENDED_AND_COMMON_CHECKERS
+        val checkerFilter = KaDiagnosticCheckerFilter.EXTENDED_AND_COMMON_CHECKERS
         return try {
             runOnAnalysisThread {
                 analyze(ktFile) {
