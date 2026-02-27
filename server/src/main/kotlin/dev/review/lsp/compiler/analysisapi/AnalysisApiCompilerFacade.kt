@@ -162,8 +162,12 @@ class AnalysisApiCompilerFacade(
             // Stdlib version mismatch — find our compatible version
             val compatibleStdlib = findKotlinStdlibJar(classpathJars, analysisApiKotlinVersion)?.toAbsolutePath()
             if (compatibleStdlib != null) {
-                System.err.println("[session] Replacing kotlin-stdlib ${existingStdlib.fileName} with compatible $analysisApiKotlinVersion version: $compatibleStdlib")
-                classpathJars.filter { it != existingStdlib } + compatibleStdlib
+                // Copy to temp dir — the IntelliJ VFS in the Analysis API resolves
+                // some paths relative to working directory despite absolute paths
+                val tempStdlib = java.nio.file.Files.createTempDirectory("lsp-stdlib").resolve(compatibleStdlib.fileName)
+                java.nio.file.Files.copy(compatibleStdlib, tempStdlib, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                System.err.println("[session] Replacing kotlin-stdlib ${existingStdlib.fileName} with compatible $analysisApiKotlinVersion version: $tempStdlib")
+                classpathJars.filter { it != existingStdlib } + tempStdlib
             } else {
                 System.err.println("[session] WARNING: kotlin-stdlib version mismatch (${existingStdlib.fileName} vs Analysis API $analysisApiKotlinVersion) but no compatible version found")
                 classpathJars
@@ -171,8 +175,10 @@ class AnalysisApiCompilerFacade(
         } else if (existingStdlib == null) {
             val stdlibJar = findKotlinStdlibJar(classpathJars, analysisApiKotlinVersion)?.toAbsolutePath()
             if (stdlibJar != null) {
-                System.err.println("[session] kotlin-stdlib not in classpath, adding: $stdlibJar")
-                classpathJars + stdlibJar
+                val tempStdlib = java.nio.file.Files.createTempDirectory("lsp-stdlib").resolve(stdlibJar.fileName)
+                java.nio.file.Files.copy(stdlibJar, tempStdlib, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                System.err.println("[session] kotlin-stdlib not in classpath, adding: $tempStdlib")
+                classpathJars + tempStdlib
             } else classpathJars
         } else classpathJars
 
