@@ -140,16 +140,6 @@ class AnalysisApiCompilerFacade(
         // Ensure kotlin-stdlib is in the classpath — KMP projects may not resolve it
         // through the standard init script path, and it's needed for basic functions
         // like .let, .also, kotlin.math.round, padStart, etc.
-        // Log kotlin-related entries for debugging classpath issues
-        val kotlinEntries = classpathJars.filter { p ->
-            val name = p.fileName?.toString() ?: ""
-            name.contains("kotlin") && name.endsWith(".jar")
-        }
-        if (kotlinEntries.isNotEmpty()) {
-            System.err.println("[session] Kotlin JARs in classpath: ${kotlinEntries.map { it.fileName }}")
-        } else {
-            System.err.println("[session] WARNING: No kotlin JARs found in classpath (${classpathJars.size} entries)")
-        }
         // Ensure a compatible kotlin-stdlib is in the classpath.
         // The project's stdlib version may not match our Analysis API version (2.1.0),
         // causing the metadata reader to fail silently. Replace with our version.
@@ -199,10 +189,11 @@ class AnalysisApiCompilerFacade(
                 platform = targetPlatform
 
                 val libraryModules = allClasspath.map { jar ->
+                    val absoluteJar = jar.toAbsolutePath()
                     addModule(buildKtLibraryModule {
                         this.platform = targetPlatform
-                        libraryName = jar.fileName.toString()
-                        addBinaryRoot(jar)
+                        libraryName = absoluteJar.fileName.toString()
+                        addBinaryRoot(absoluteJar)
                     })
                 }
 
