@@ -1,0 +1,14 @@
+{
+  "name": "compose-samples-jetsnack",
+  "type": "android",
+  "files_tested": 15,
+  "startup_time_s": 70.304,
+  "server_crashed": true,
+  "hover": {
+    "total": 657,
+    "resolved": 657,
+    "unresolved": 0,
+    "errors": 0,
+    "success_rate": 1
+  }
+}

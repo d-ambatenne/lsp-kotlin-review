@@ -1,0 +1,45 @@
+{
+  "name": "kotlinx-coroutines",
+  "type": "kmp",
+  "files_tested": 15,
+  "startup_time_s": 120.42,
+  "server_crashed": false,
+  "hover": {
+    "total": 474,
+    "resolved": 8,
+    "unresolved": 466,
+    "errors": 0,
+    "success_rate": 0.016877637130801686
+  },
+  "definition": {
+    "total": 328,
+    "resolved": 8,
+    "unresolved": 320,
+    "errors": 0,
+    "success_rate": 0.024390243902439025
+  },
+  "diagnostics": {
+    "files_opened": 15,
+    "files_with_diagnostics": 1,
+    "total_diagnostics": 1,
+    "errors": 0,
+    "warnings": 1,
+    "info": 0,
+    "hints": 0,
+    "server_crashes": 0
+  },
+  "completion": {
+    "positions_tested": 231,
+    "non_empty": 231,
+    "empty": 0,
+    "errors": 0,
+    "success_rate": 1
+  },
+  "references": {
+    "total": 235,
+    "resolved": 8,
+    "unresolved": 227,
+    "errors": 0,
+    "success_rate": 0.03404255319148936
+  }
+}

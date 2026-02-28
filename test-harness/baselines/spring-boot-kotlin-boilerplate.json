@@ -1,0 +1,53 @@
+{
+  "name": "spring-boot-kotlin-boilerplate",
+  "type": "jvm",
+  "files_tested": 15,
+  "startup_time_s": 120.328,
+  "server_crashed": false,
+  "hover": {
+    "total": 430,
+    "resolved": 430,
+    "unresolved": 0,
+    "errors": 0,
+    "success_rate": 1
+  },
+  "definition": {
+    "total": 324,
+    "resolved": 324,
+    "unresolved": 0,
+    "errors": 0,
+    "success_rate": 1
+  },
+  "diagnostics": {
+    "files_opened": 15,
+    "files_with_diagnostics": 0,
+    "total_diagnostics": 0,
+    "errors": 0,
+    "warnings": 0,
+    "info": 0,
+    "hints": 0,
+    "server_crashes": 0
+  },
+  "completion": {
+    "positions_tested": 248,
+    "non_empty": 248,
+    "empty": 0,
+    "errors": 0,
+    "success_rate": 1
+  },
+  "references": {
+    "total": 240,
+    "resolved": 212,
+    "unresolved": 28,
+    "errors": 0,
+    "success_rate": 0.8833333333333333
+  },
+  "symbols": {
+    "files_tested": 15,
+    "total_symbols": 59,
+    "files_with_symbols": 15,
+    "files_empty": 0,
+    "errors": 0,
+    "success_rate": 1
+  }
+}

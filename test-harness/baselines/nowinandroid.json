@@ -1,0 +1,53 @@
+{
+  "name": "nowinandroid",
+  "type": "android",
+  "files_tested": 15,
+  "startup_time_s": 120.403,
+  "server_crashed": false,
+  "hover": {
+    "total": 516,
+    "resolved": 0,
+    "unresolved": 516,
+    "errors": 0,
+    "success_rate": 0
+  },
+  "definition": {
+    "total": 383,
+    "resolved": 0,
+    "unresolved": 383,
+    "errors": 0,
+    "success_rate": 0
+  },
+  "diagnostics": {
+    "files_opened": 15,
+    "files_with_diagnostics": 0,
+    "total_diagnostics": 0,
+    "errors": 0,
+    "warnings": 0,
+    "info": 0,
+    "hints": 0,
+    "server_crashes": 0
+  },
+  "completion": {
+    "positions_tested": 252,
+    "non_empty": 252,
+    "empty": 0,
+    "errors": 0,
+    "success_rate": 1
+  },
+  "references": {
+    "total": 273,
+    "resolved": 0,
+    "unresolved": 273,
+    "errors": 0,
+    "success_rate": 0
+  },
+  "symbols": {
+    "files_tested": 15,
+    "total_symbols": 0,
+    "files_with_symbols": 0,
+    "files_empty": 15,
+    "errors": 0,
+    "success_rate": 0
+  }
+}

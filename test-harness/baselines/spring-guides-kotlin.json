@@ -1,0 +1,53 @@
+{
+  "name": "spring-guides-kotlin",
+  "type": "jvm",
+  "files_tested": 8,
+  "startup_time_s": 59.263,
+  "server_crashed": false,
+  "hover": {
+    "total": 268,
+    "resolved": 267,
+    "unresolved": 1,
+    "errors": 0,
+    "success_rate": 0.996268656716418
+  },
+  "definition": {
+    "total": 200,
+    "resolved": 200,
+    "unresolved": 0,
+    "errors": 0,
+    "success_rate": 1
+  },
+  "diagnostics": {
+    "files_opened": 8,
+    "files_with_diagnostics": 0,
+    "total_diagnostics": 0,
+    "errors": 0,
+    "warnings": 0,
+    "info": 0,
+    "hints": 0,
+    "server_crashes": 0
+  },
+  "completion": {
+    "positions_tested": 120,
+    "non_empty": 120,
+    "empty": 0,
+    "errors": 0,
+    "success_rate": 1
+  },
+  "references": {
+    "total": 146,
+    "resolved": 144,
+    "unresolved": 2,
+    "errors": 0,
+    "success_rate": 0.9863013698630136
+  },
+  "symbols": {
+    "files_tested": 8,
+    "total_symbols": 31,
+    "files_with_symbols": 8,
+    "files_empty": 0,
+    "errors": 0,
+    "success_rate": 1
+  }
+}

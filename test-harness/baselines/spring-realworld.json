@@ -1,0 +1,53 @@
+{
+  "name": "spring-realworld",
+  "type": "jvm",
+  "files_tested": 15,
+  "startup_time_s": 1.206,
+  "server_crashed": false,
+  "hover": {
+    "total": 518,
+    "resolved": 400,
+    "unresolved": 118,
+    "errors": 0,
+    "success_rate": 0.7722007722007722
+  },
+  "definition": {
+    "total": 385,
+    "resolved": 294,
+    "unresolved": 91,
+    "errors": 0,
+    "success_rate": 0.7636363636363637
+  },
+  "diagnostics": {
+    "files_opened": 15,
+    "files_with_diagnostics": 15,
+    "total_diagnostics": 386,
+    "errors": 367,
+    "warnings": 19,
+    "info": 0,
+    "hints": 0,
+    "server_crashes": 0
+  },
+  "completion": {
+    "positions_tested": 249,
+    "non_empty": 249,
+    "empty": 0,
+    "errors": 0,
+    "success_rate": 1
+  },
+  "references": {
+    "total": 277,
+    "resolved": 218,
+    "unresolved": 59,
+    "errors": 0,
+    "success_rate": 0.7870036101083032
+  },
+  "symbols": {
+    "files_tested": 15,
+    "total_symbols": 71,
+    "files_with_symbols": 15,
+    "files_empty": 0,
+    "errors": 0,
+    "success_rate": 1
+  }
+}
