@@ -7,7 +7,7 @@ import { parse as parseYaml } from 'yaml';
 import { LspRunner, RunOptions } from './lsp-runner';
 import { ReportGenerator } from './report-generator';
 import { AIEvaluator } from './ai-evaluator';
-import { HarnessConfig, ProjectConfig, HoverSample, ProjectReport } from './types';
+import { HarnessConfig, ProjectConfig, HoverSample, CompletionSample, ProjectReport } from './types';
 import { ProjectManager } from './project-manager';
 
 const DEFAULT_CONFIG_PATH = path.join(process.cwd(), 'projects.yaml');
@@ -92,13 +92,15 @@ program
     const runner = new LspRunner();
     const reportGen = new ReportGenerator();
     const projectReports: ProjectReport[] = [];
-    let allSamples: HoverSample[] = [];
+    let allHoverSamples: HoverSample[] = [];
+    let allCompletionSamples: CompletionSample[] = [];
 
     for (const project of projects) {
       try {
-        const { report, samples } = await runner.runProject(project, runOptions);
+        const { report, hoverSamples, completionSamples } = await runner.runProject(project, runOptions);
         projectReports.push(report);
-        allSamples.push(...samples);
+        allHoverSamples.push(...hoverSamples);
+        allCompletionSamples.push(...completionSamples);
       } catch (error) {
         console.error(`\nFATAL ERROR testing ${project.name}: ${error}`);
         projectReports.push({
@@ -132,8 +134,28 @@ program
     if (opts.aiEval) {
       console.log('\n=== AI Evaluation ===');
       const evaluator = new AIEvaluator();
-      const aiResult = await evaluator.evaluateHoverQuality(allSamples);
+
+      // Hover quality
+      const aiResult = await evaluator.evaluateHoverQuality(allHoverSamples);
       console.log(`  Hover quality: ${aiResult.hover_quality_avg.toFixed(1)}/5 (${aiResult.samples_evaluated} samples)`);
+
+      // Completion quality
+      if (allCompletionSamples.length > 0) {
+        const compResult = await evaluator.evaluateCompletionQuality(allCompletionSamples);
+        aiResult.completion_quality_avg = compResult.avg;
+        aiResult.details.push(...compResult.details);
+        aiResult.samples_evaluated += compResult.details.length;
+
+        const dotDetails = compResult.details.filter(d => d.feature === 'completion_dot');
+        const partialDetails = compResult.details.filter(d => d.feature === 'completion_partial');
+        const kwDetails = compResult.details.filter(d => d.feature === 'completion_keyword');
+        const avgOf = (arr: { score: number }[]) => arr.length > 0 ? arr.reduce((s, d) => s + d.score, 0) / arr.length : 0;
+
+        console.log(`  Completion quality: ${compResult.avg.toFixed(1)}/5 (${compResult.details.length} samples)`);
+        if (dotDetails.length > 0) console.log(`    Dot completion: ${avgOf(dotDetails).toFixed(1)}/5 (${dotDetails.length} samples)`);
+        if (partialDetails.length > 0) console.log(`    Partial completion: ${avgOf(partialDetails).toFixed(1)}/5 (${partialDetails.length} samples)`);
+        if (kwDetails.length > 0) console.log(`    Keyword completion: ${avgOf(kwDetails).toFixed(1)}/5 (${kwDetails.length} samples)`);
+      }
 
       // Attach AI results to each project report
       for (const pr of projectReports) {

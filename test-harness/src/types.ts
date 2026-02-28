@@ -62,6 +62,7 @@ export interface SymbolsReport {
 
 export interface AIEvaluation {
   hover_quality_avg: number;
+  completion_quality_avg: number;
   diagnostic_accuracy: number;
   samples_evaluated: number;
   details: AIEvalDetail[];
@@ -126,6 +127,19 @@ export interface HoverSample {
   character: number;
   hoverContent: string | null;
   sourceContext: string;
+}
+
+export interface CompletionSample {
+  file: string;
+  line: number;
+  character: number;
+  triggerKind: 'dot' | 'partial' | 'keyword';
+  /** The text before the cursor (e.g., "str.", "pri", "if") */
+  prefix: string;
+  sourceContext: string;
+  /** Top 10 completion item labels returned by the server */
+  items: string[];
+  itemCount: number;
 }
 
 export interface ValidatorResult<T> {

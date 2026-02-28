@@ -9,7 +9,7 @@ import { CompletionValidator } from './validators/completion';
 import { DiagnosticsValidator } from './validators/diagnostics';
 import { SymbolsValidator } from './validators/symbols';
 import { ReferencesValidator } from './validators/references';
-import { HoverSample } from './types';
+import { HoverSample, CompletionSample } from './types';
 
 export interface RunOptions {
   serverJarPath: string;
@@ -23,7 +23,7 @@ export interface RunOptions {
 export class LspRunner {
   private projectManager = new ProjectManager();
 
-  async runProject(project: ProjectConfig, options: RunOptions): Promise<{ report: ProjectReport; samples: HoverSample[] }> {
+  async runProject(project: ProjectConfig, options: RunOptions): Promise<{ report: ProjectReport; hoverSamples: HoverSample[]; completionSamples: CompletionSample[] }> {
     console.log(`\n--- Testing project: ${project.name} (${project.type}) ---`);
 
     // Clone
@@ -46,7 +46,8 @@ export class LspRunner {
           startup_time_s: 0,
           server_crashed: false,
         },
-        samples: [],
+        hoverSamples: [],
+        completionSamples: [],
       };
     }
 
@@ -84,6 +85,7 @@ export class LspRunner {
       };
 
       let allHoverSamples: HoverSample[] = [];
+      let allCompletionSamples: CompletionSample[] = [];
 
       // Open all files first (triggers didOpen, which the server needs to know about files)
       console.log(`  Opening ${filesToTest.length} files...`);
@@ -107,8 +109,11 @@ export class LspRunner {
         try {
           const result = await this.runValidator(feature, client, filesToTest);
           (report as any)[feature] = result.report;
-          if (result.samples) {
-            allHoverSamples.push(...result.samples);
+          if (result.hoverSamples) {
+            allHoverSamples.push(...result.hoverSamples);
+          }
+          if (result.completionSamples) {
+            allCompletionSamples.push(...result.completionSamples);
           }
         } catch (error) {
           console.log(`  ERROR in ${feature}: ${error}`);
@@ -117,18 +122,19 @@ export class LspRunner {
 
       report.server_crashed = client.serverCrashed;
 
-      return { report, samples: allHoverSamples };
+      return { report, hoverSamples: allHoverSamples, completionSamples: allCompletionSamples };
     } finally {
       console.log(`  Shutting down server...`);
       await client.shutdown();
     }
   }
 
-  private async runValidator(feature: Feature, client: LspClient, files: string[]): Promise<{ report: any; samples?: HoverSample[] }> {
+  private async runValidator(feature: Feature, client: LspClient, files: string[]): Promise<{ report: any; hoverSamples?: HoverSample[]; completionSamples?: CompletionSample[] }> {
     switch (feature) {
       case 'hover': {
         const validator = new HoverValidator();
-        return validator.validate(client, files);
+        const result = await validator.validate(client, files);
+        return { report: result.report, hoverSamples: result.samples };
       }
       case 'definition': {
         const validator = new DefinitionValidator();
@@ -136,7 +142,8 @@ export class LspRunner {
       }
       case 'completion': {
         const validator = new CompletionValidator();
-        return { report: await validator.validate(client, files) };
+        const result = await validator.validate(client, files);
+        return { report: result.report, completionSamples: result.samples };
       }
       case 'diagnostics': {
         const validator = new DiagnosticsValidator();

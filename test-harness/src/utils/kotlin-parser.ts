@@ -141,3 +141,62 @@ export function findPartialCompletionPositions(source: string): SymbolLocation[]
 
   return positions;
 }
+
+/**
+ * Find positions where keyword completion should trigger.
+ * Looks for: start of statements inside function bodies, after '{', after '=', blank lines.
+ */
+export function findKeywordCompletionPositions(source: string): SymbolLocation[] {
+  const positions: SymbolLocation[] = [];
+  const lines = source.split('\n');
+  let braceDepth = 0;
+
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
+    const trimmed = line.trim();
+
+    for (const ch of line) {
+      if (ch === '{') braceDepth++;
+      if (ch === '}') braceDepth--;
+    }
+
+    // Only inside function/class bodies
+    if (braceDepth <= 0) continue;
+    if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
+
+    // Position at line indent (where a new statement would start)
+    if (trimmed === '' || trimmed === '}') {
+      const indent = line.length - line.trimStart().length;
+      positions.push({
+        name: '<empty-line>',
+        line: lineIdx,
+        character: indent,
+        kind: 'keyword_completion',
+      });
+    }
+
+    // Position right after opening brace on same line (e.g., "fun foo() {|")
+    const braceIdx = line.indexOf('{');
+    if (braceIdx >= 0 && braceIdx === line.trimEnd().length - 1) {
+      positions.push({
+        name: '<after-brace>',
+        line: lineIdx,
+        character: braceIdx + 1,
+        kind: 'keyword_completion',
+      });
+    }
+
+    // Position after '=' (expression context — when, if, try should complete)
+    const eqMatch = line.match(/=\s*$/);
+    if (eqMatch) {
+      positions.push({
+        name: '<after-equals>',
+        line: lineIdx,
+        character: line.length,
+        kind: 'keyword_completion',
+      });
+    }
+  }
+
+  return positions;
+}
