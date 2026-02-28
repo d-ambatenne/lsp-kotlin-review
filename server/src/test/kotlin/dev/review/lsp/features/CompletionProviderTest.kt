@@ -29,10 +29,12 @@ class CompletionProviderTest {
         val result = provider.completion(params).get()
         val items = result.left
 
-        assertEquals(2, items.size)
-        assertEquals("println", items[0].label)
-        assertEquals(CompletionItemKind.Function, items[0].kind)
-        assertEquals("fun println(message: Any?)", items[0].detail)
+        // Should contain the facade candidates + keywords
+        assertTrue(items.size >= 2, "Expected at least 2 items, got ${items.size}")
+        val facadeItems = items.filter { it.kind == CompletionItemKind.Function }
+        assertEquals(2, facadeItems.size)
+        assertEquals("println", facadeItems[0].label)
+        assertEquals("fun println(message: Any?)", facadeItems[0].detail)
     }
 
     @Test
@@ -50,17 +52,41 @@ class CompletionProviderTest {
         val result = provider.completion(params).get()
         val items = result.left
 
-        assertEquals(1, items.size)
-        assertTrue(items[0].tags.contains(CompletionItemTag.Deprecated))
+        val deprecated = items.filter { it.tags?.contains(CompletionItemTag.Deprecated) == true }
+        assertEquals(1, deprecated.size)
+        assertEquals("oldMethod", deprecated[0].label)
     }
 
     @Test
-    fun `returns empty when no completions`() {
+    fun `returns keywords when no facade completions`() {
         val facade = StubCompilerFacade()
         val provider = CompletionProvider(facade)
         val params = CompletionParams(TextDocumentIdentifier(testUri), Position(5, 6))
         val result = provider.completion(params).get()
+        val items = result.left
 
-        assertTrue(result.left.isEmpty())
+        // Should contain keyword completions
+        assertTrue(items.isNotEmpty(), "Expected keyword completions")
+        val keywords = items.filter { it.kind == CompletionItemKind.Keyword }
+        assertTrue(keywords.isNotEmpty(), "Expected keyword items")
+        assertTrue(keywords.any { it.label == "val" })
+        assertTrue(keywords.any { it.label == "fun" })
+        assertTrue(keywords.any { it.label == "class" })
+    }
+
+    @Test
+    fun `keywords have correct insert text`() {
+        val facade = StubCompilerFacade()
+        val provider = CompletionProvider(facade)
+        val params = CompletionParams(TextDocumentIdentifier(testUri), Position(5, 6))
+        val result = provider.completion(params).get()
+        val items = result.left
+
+        val valItem = items.first { it.label == "val" }
+        assertEquals("val ", valItem.insertText)
+        assertEquals("Immutable variable", valItem.detail)
+
+        val ifItem = items.first { it.label == "if" }
+        assertEquals("if (", ifItem.insertText)
     }
 }
