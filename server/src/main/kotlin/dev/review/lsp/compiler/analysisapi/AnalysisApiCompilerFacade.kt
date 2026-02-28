@@ -1258,9 +1258,19 @@ class AnalysisApiCompilerFacade(
         }
     }
 
+    @Volatile private var lastRebuildTime = 0L
+    private val rebuildCooldownMs = 5000L // Don't rebuild more than once per 5 seconds
+
     override fun refreshAnalysis() {
         // The standalone Analysis API's PSI/FIR are immutable after session creation.
         // The only way to pick up file changes is to rebuild all sessions from disk.
+        val now = System.currentTimeMillis()
+        if (now - lastRebuildTime < rebuildCooldownMs) {
+            System.err.println("[session] Skipping rebuild (cooldown: ${rebuildCooldownMs}ms)")
+            return
+        }
+        lastRebuildTime = now
+
         synchronized(symbolCache) {
             symbolCache.clear()
         }
