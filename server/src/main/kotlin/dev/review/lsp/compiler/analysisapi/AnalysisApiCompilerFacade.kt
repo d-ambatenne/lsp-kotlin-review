@@ -88,40 +88,46 @@ class AnalysisApiCompilerFacade(
         }
     }
 
+    // Caches for expensive operations — persist across session rebuilds
+    private val klibStubCache = ConcurrentHashMap<String, List<Path>>() // normalized klib set key → stub roots
+    private val aarExtractionCache = ConcurrentHashMap<Path, Path?>() // aar path → extracted classes.jar
+
     private fun buildSingleSession(
         targetPlatform: org.jetbrains.kotlin.platform.TargetPlatform,
         sourceRoots: List<Path>,
         classpathJars: List<Path>,
         includeJdk: Boolean
     ): org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession {
-        // Separate klib files from regular JARs — generate stubs for klibs
+        // Separate klib files from regular JARs — generate stubs for klibs (cached)
         val klibFiles = classpathJars.filter { it.toString().endsWith(".klib") }
         val nonKlibEntries = classpathJars.filter { !it.toString().endsWith(".klib") }
 
         val klibStubRoots = if (klibFiles.isNotEmpty()) {
-            // Deduplicate architecture variants (e.g., uikitArm64Main vs uikitSimArm64Main)
-            // by normalizing the filename and keeping only the first variant per library
             val deduped = klibFiles.groupBy { klib ->
                 klib.fileName.toString()
                     .replace(Regex("(Arm64|SimArm64|X64|SimulatorArm64|iosArm64|iosSimulatorArm64|iosX64|uikitArm64|uikitSimArm64)"), "")
             }.map { it.value.first() }
-            val stubGen = KlibStubGenerator()
-            System.err.println("[session] Generating stubs for ${deduped.size} klib files (${klibFiles.size - deduped.size} arch variants deduped)...")
-            val roots = deduped.mapNotNull { klib ->
-                try {
-                    stubGen.generateStubs(klib)
-                } catch (e: Exception) {
-                    System.err.println("[session] klib stub generation failed for ${klib.fileName}: ${e.message}")
-                    null
+
+            // Cache key: sorted list of klib filenames
+            val cacheKey = deduped.map { it.fileName.toString() }.sorted().joinToString(",")
+            klibStubCache.getOrPut(cacheKey) {
+                val stubGen = KlibStubGenerator()
+                System.err.println("[session] Generating stubs for ${deduped.size} klib files (${klibFiles.size - deduped.size} arch variants deduped)...")
+                deduped.mapNotNull { klib ->
+                    try {
+                        stubGen.generateStubs(klib)
+                    } catch (e: Exception) {
+                        System.err.println("[session] klib stub generation failed for ${klib.fileName}: ${e.message}")
+                        null
+                    }
                 }
             }
-            roots
         } else emptyList()
 
-        // Extract classes.jar from AAR files (Android Archive bundles)
+        // Extract classes.jar from AAR files (cached)
         val allClasspath = nonKlibEntries.flatMap { entry ->
             if (entry.toString().endsWith(".aar")) {
-                val extracted = extractClassesFromAar(entry)
+                val extracted = aarExtractionCache.getOrPut(entry) { extractClassesFromAar(entry) }
                 if (extracted != null) listOf(extracted) else emptyList()
             } else {
                 listOf(entry)
