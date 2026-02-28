@@ -1,13 +1,8 @@
 package dev.review.lsp.compiler.analysisapi
 
-import org.jetbrains.kotlin.library.MetadataLibrary
-import org.jetbrains.kotlin.library.metadata.parseModuleHeader
 import org.jetbrains.kotlin.library.metadata.parsePackageFragment
 import org.jetbrains.kotlin.metadata.ProtoBuf
 import org.jetbrains.kotlin.metadata.deserialization.Flags
-import org.jetbrains.kotlin.metadata.deserialization.NameResolver
-import org.jetbrains.kotlin.metadata.deserialization.getExtensionOrNull
-import org.jetbrains.kotlin.serialization.StringTableImpl
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -29,68 +24,82 @@ class KlibStubGenerator {
      */
     fun generateStubs(klibPath: Path): Path? {
         return try {
-            val library = loadKlib(klibPath) ?: return null
+            val metadata = loadKlib(klibPath) ?: return null
             val outputDir = Files.createTempDirectory("lsp-klib-stubs")
+            var stubCount = 0
 
-            val header = parseModuleHeader(library.moduleHeaderData)
-            val packageNames = header.packageFragmentNameList
-
-            for (pkgFqName in packageNames) {
-                try {
-                    val parts = library.packageMetadataParts(pkgFqName)
-                    for (partName in parts) {
-                        val bytes = library.packageMetadata(pkgFqName, partName)
+            for ((pkgFqName, fragments) in metadata.packages) {
+                for (bytes in fragments) {
+                    try {
                         val fragment = parsePackageFragment(bytes)
-                        generateFragmentStub(outputDir, pkgFqName, fragment)
+                        if (generateFragmentStub(outputDir, pkgFqName, fragment)) {
+                            stubCount++
+                        }
+                    } catch (e: Exception) {
+                        // Skip individual fragments that fail to parse
                     }
-                } catch (e: Exception) {
-                    System.err.println("[klib-stub] Failed to process package $pkgFqName in ${klibPath.fileName}: ${e.message}")
                 }
             }
 
-            outputDir
+            if (stubCount > 0) outputDir else null
         } catch (e: Exception) {
             System.err.println("[klib-stub] Failed to generate stubs from ${klibPath.fileName}: ${e.message}")
             null
         }
     }
 
-    private fun loadKlib(klibPath: Path): MetadataLibrary? {
+    /**
+     * Klib metadata read directly from ZIP — no KlibLoader dependency.
+     */
+    private data class KlibMetadata(
+        val moduleHeader: ByteArray,
+        val packages: Map<String, List<ByteArray>> // packageFqName -> list of fragment bytes
+    )
+
+    private fun loadKlib(klibPath: Path): KlibMetadata? {
         return try {
-            // Use reflection to load klib — the API may vary between versions
-            val loaderClass = Class.forName("org.jetbrains.kotlin.library.loader.KlibLoader")
-            val constructor = loaderClass.constructors.firstOrNull { c ->
-                c.parameterCount >= 1 && c.parameterTypes[0] == Path::class.java
-            } ?: loaderClass.constructors.firstOrNull { c ->
-                c.parameterCount >= 1
-            }
-            if (constructor == null) {
-                System.err.println("[klib-stub] KlibLoader constructor not found")
-                return null
-            }
+            val zipFile = java.util.zip.ZipFile(klibPath.toFile())
+            zipFile.use { zip ->
+                // Find the component directory (usually "default/" or the library name)
+                val entries = zip.entries().toList()
+                val linkdataEntries = entries.filter { it.name.contains("/linkdata/") || it.name.startsWith("linkdata/") }
+                if (linkdataEntries.isEmpty()) return null
 
-            val loader = if (constructor.parameterTypes[0] == Path::class.java) {
-                constructor.newInstance(klibPath)
-            } else {
-                constructor.newInstance(klibPath.toFile())
-            }
+                // Determine the component prefix (e.g., "default/" or "")
+                val prefix = linkdataEntries.first().name.substringBefore("linkdata/")
 
-            val loadMethod = loaderClass.methods.firstOrNull { it.name == "load" }
-                ?: return null
-            val result = loadMethod.invoke(loader)
+                // Read module header
+                val moduleEntry = zip.getEntry("${prefix}linkdata/module") ?: return null
+                val moduleHeader = zip.getInputStream(moduleEntry).readBytes()
 
-            // KlibLoaderResult has a load() method that returns List<KotlinLibrary>
-            val resultLoadMethod = result.javaClass.methods.firstOrNull { it.name == "load" }
-            if (resultLoadMethod != null) {
-                val libraries = resultLoadMethod.invoke(result) as? List<*>
-                libraries?.firstOrNull() as? MetadataLibrary
-            } else {
-                // Maybe it returns the library directly
-                (result as? List<*>)?.firstOrNull() as? MetadataLibrary
-                    ?: result as? MetadataLibrary
+                // Read package fragments
+                val packages = mutableMapOf<String, MutableList<ByteArray>>()
+                for (entry in linkdataEntries) {
+                    if (entry.isDirectory) continue
+                    val relativePath = entry.name.removePrefix(prefix).removePrefix("linkdata/")
+                    if (relativePath == "module") continue
+                    if (!relativePath.endsWith(".knm")) continue
+
+                    // Extract package name from path: "root_package/com/example/0_Foo.knm"
+                    // or "package_com.example/0_Foo.knm"
+                    val parts = relativePath.split("/")
+                    val pkgFqName = if (parts.size >= 2) {
+                        val dirName = parts.dropLast(1).joinToString("/")
+                        // Convert directory path to package FQN
+                        dirName.replace("root_package/", "")
+                            .replace("root_package", "")
+                            .replace("/", ".")
+                            .trimEnd('.')
+                    } else ""
+
+                    val bytes = zip.getInputStream(entry).readBytes()
+                    packages.getOrPut(pkgFqName) { mutableListOf() }.add(bytes)
+                }
+
+                KlibMetadata(moduleHeader, packages)
             }
         } catch (e: Exception) {
-            System.err.println("[klib-stub] Failed to load klib ${klibPath.fileName}: ${e.javaClass.simpleName}: ${e.message}")
+            System.err.println("[klib-stub] Failed to read klib ${klibPath.fileName}: ${e.javaClass.simpleName}: ${e.message}")
             null
         }
     }
@@ -99,7 +108,7 @@ class KlibStubGenerator {
         outputDir: Path,
         pkgFqName: String,
         fragment: ProtoBuf.PackageFragment
-    ) {
+    ): Boolean {
         val sb = StringBuilder()
         if (pkgFqName.isNotEmpty()) {
             sb.appendLine("package $pkgFqName")
@@ -136,9 +145,11 @@ class KlibStubGenerator {
             // Write to file
             val pkgDir = outputDir.resolve(pkgFqName.replace('.', '/'))
             Files.createDirectories(pkgDir)
-            val fileName = "stubs_${pkgFqName.replace('.', '_')}.kt"
+            val fileName = "stubs_${pkgFqName.replace('.', '_')}_${System.nanoTime()}.kt"
             Files.writeString(pkgDir.resolve(fileName), content)
+            return true
         }
+        return false
     }
 
     private fun generateClassStub(
