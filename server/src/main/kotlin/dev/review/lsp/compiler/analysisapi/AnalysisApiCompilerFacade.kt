@@ -99,27 +99,20 @@ class AnalysisApiCompilerFacade(
         val nonKlibEntries = classpathJars.filter { !it.toString().endsWith(".klib") }
 
         val klibStubRoots = if (klibFiles.isNotEmpty()) {
+            // Deduplicate architecture variants (e.g., uikitArm64Main vs uikitSimArm64Main)
+            // by normalizing the filename and keeping only the first variant per library
+            val deduped = klibFiles.groupBy { klib ->
+                klib.fileName.toString()
+                    .replace(Regex("(Arm64|SimArm64|X64|SimulatorArm64|iosArm64|iosSimulatorArm64|iosX64|uikitArm64|uikitSimArm64)"), "")
+            }.map { it.value.first() }
             val stubGen = KlibStubGenerator()
-            System.err.println("[session] Generating stubs for ${klibFiles.size} klib files...")
-            val roots = klibFiles.mapNotNull { klib ->
+            System.err.println("[session] Generating stubs for ${deduped.size} klib files (${klibFiles.size - deduped.size} arch variants deduped)...")
+            val roots = deduped.mapNotNull { klib ->
                 try {
                     stubGen.generateStubs(klib)
                 } catch (e: Exception) {
                     System.err.println("[session] klib stub generation failed for ${klib.fileName}: ${e.message}")
                     null
-                }
-            }
-            // Log first few stub roots with sample content for debugging
-            if (roots.isNotEmpty()) {
-                for (root in roots.take(3)) {
-                    try {
-                        val files = java.nio.file.Files.walk(root).filter { it.toString().endsWith(".kt") }.toList()
-                        System.err.println("[session] klib stub root $root: ${files.size} .kt files")
-                        files.firstOrNull()?.let { f ->
-                            val content = java.nio.file.Files.readString(f)
-                            System.err.println("[session] Sample stub (${f.fileName}): ${content.take(200)}")
-                        }
-                    } catch (_: Exception) { }
                 }
             }
             roots
