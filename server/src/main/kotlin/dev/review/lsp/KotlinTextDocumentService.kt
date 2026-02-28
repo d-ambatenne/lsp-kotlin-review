@@ -84,7 +84,9 @@ class KotlinTextDocumentService : TextDocumentService {
         }
         val path = UriUtil.toPath(uri)
         f.updateFileContent(path, params.textDocument.text)
-        diagnosticsPublisher?.publishDiagnostics(path, uri, version) { documentVersions[uri] }
+        // Publish diagnostics asynchronously — serves cached results immediately,
+        // computes fresh in background without blocking hover/completion
+        diagnosticsPublisher?.publishDiagnosticsAsync(path, uri, version) { documentVersions[uri] }
     }
 
     override fun didChange(params: DidChangeTextDocumentParams) {
@@ -98,14 +100,9 @@ class KotlinTextDocumentService : TextDocumentService {
         val path = UriUtil.toPath(uri)
         f.updateFileContent(path, content)
 
-        // Cancel any pending debounced diagnostics for this URI
-        pendingDiagnostics.remove(uri)?.cancel(false)
-
-        // Schedule debounced diagnostics
-        val future = debounceScheduler.schedule({
-            diagnosticsPublisher?.publishDiagnostics(path, uri, version) { documentVersions[uri] }
-        }, debounceMs, TimeUnit.MILLISECONDS)
-        pendingDiagnostics[uri] = future
+        // No diagnostics on didChange — the Analysis API session is immutable (ADR-16),
+        // so collectDiagnostics returns the same results until the next save/rebuild.
+        // This avoids blocking the analysis thread on every keystroke.
     }
 
     override fun didClose(params: DidCloseTextDocumentParams) {
@@ -119,6 +116,9 @@ class KotlinTextDocumentService : TextDocumentService {
         val f = facade ?: return
         val uri = params.textDocument.uri
         val path = UriUtil.toPath(uri)
+
+        // Invalidate diagnostic cache — session is about to be rebuilt
+        diagnosticsPublisher?.invalidateCache()
 
         // Rebuild analysis session from disk to pick up saved changes
         f.refreshAnalysis()
