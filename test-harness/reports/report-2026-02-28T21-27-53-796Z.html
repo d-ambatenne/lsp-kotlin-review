@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LSP Test Harness Report - 1.5.0</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 2rem; background: #f8f9fa; }
+  h1 { color: #7F52FF; }
+  h2 { color: #333; margin-top: 2rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #eee; }
+  th { background: #f5f5f5; font-weight: 600; }
+  .bar { display: inline-block; height: 18px; border-radius: 3px; min-width: 3px; }
+  .bar-bg { display: inline-block; width: 100px; height: 18px; background: #eee; border-radius: 3px; position: relative; }
+  .pass { color: #28a745; font-weight: 600; }
+  .fail { color: #dc3545; font-weight: 600; }
+  .warn { color: #ffc107; font-weight: 600; }
+  .summary { display: flex; gap: 2rem; margin: 1rem 0; }
+  .summary-card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); flex: 1; }
+  .summary-card h3 { margin: 0 0 0.5rem; color: #666; font-size: 0.9rem; }
+  .summary-card .value { font-size: 2rem; font-weight: 700; color: #333; }
+  .meta { color: #888; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<h1>LSP Test Harness Report</h1>
+<p class="meta">Version: 1.5.0 | Generated: 2026-02-28T21:27:53.775Z</p>
+
+<div class="summary">
+  <div class="summary-card">
+    <h3>Projects Tested</h3>
+    <div class="value">15</div>
+  </div>
+  <div class="summary-card">
+    <h3>Passed / Failed</h3>
+    <div class="value"><span class="pass">14</span> / <span class="fail">1</span></div>
+  </div>
+  <div class="summary-card">
+    <h3>Hover Rate</h3>
+    <div class="value">36.3%</div>
+  </div>
+  <div class="summary-card">
+    <h3>Definition Rate</h3>
+    <div class="value">31.5%</div>
+  </div>
+  <div class="summary-card">
+    <h3>Completion Rate</h3>
+    <div class="value">100.0%</div>
+  </div>
+</div>
+
+<h2>Project Results</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Project</th>
+      <th>Type</th>
+      <th>Files</th>
+      <th>Startup</th>
+      <th>Hover</th>
+      <th>Definition</th>
+      <th>Completion</th>
+      <th>Diagnostics</th>
+      <th>Symbols</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    
+      <tr>
+        <td><strong>nowinandroid</strong></td>
+        <td>android</td>
+        <td>15</td>
+        <td>120.4s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td>0 (0E/0W)</td>
+        <td>0</td>
+        <td><span class="pass">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>compose-samples-jetsnack</strong></td>
+        <td>android</td>
+        <td>15</td>
+        <td>70.3s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td>-</td>
+        <td>-</td>
+        <td>-</td>
+        <td>-</td>
+        <td><span class="fail">CRASHED</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>compose-samples-jetcaster</strong></td>
+        <td>android</td>
+        <td>15</td>
+        <td>91.3s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td>0 (0E/0W)</td>
+        <td>0</td>
+        <td><span class="pass">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>NotyKT</strong></td>
+        <td>android</td>
+        <td>15</td>
+        <td>57.3s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td>0 (0E/0W)</td>
+        <td>-</td>
+        <td><span class="pass">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>Pokedex</strong></td>
+        <td>android</td>
+        <td>15</td>
+        <td>101.3s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td>0 (0E/0W)</td>
+        <td>0</td>
+        <td><span class="pass">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>spring-realworld</strong></td>
+        <td>jvm</td>
+        <td>15</td>
+        <td>1.2s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:77px;background:#28a745"></div></div> 77%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:76px;background:#28a745"></div></div> 76%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td>386 (367E/19W)</td>
+        <td>71</td>
+        <td><span class="pass">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>spring-boot-kotlin-boilerplate</strong></td>
+        <td>jvm</td>
+        <td>15</td>
+        <td>120.3s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td>0 (0E/0W)</td>
+        <td>59</td>
+        <td><span class="pass">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>spring-boot-kotlin-demo</strong></td>
+        <td>jvm</td>
+        <td>4</td>
+        <td>60.3s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:99px;background:#28a745"></div></div> 99%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td>0 (0E/0W)</td>
+        <td>10</td>
+        <td><span class="pass">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>spring-guides-kotlin</strong></td>
+        <td>jvm</td>
+        <td>8</td>
+        <td>59.3s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td>0 (0E/0W)</td>
+        <td>31</td>
+        <td><span class="pass">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>spring-petclinic-kotlin</strong></td>
+        <td>jvm</td>
+        <td>15</td>
+        <td>30.2s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:67px;background:#ffc107"></div></div> 67%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:62px;background:#ffc107"></div></div> 62%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td>178 (174E/4W)</td>
+        <td>29</td>
+        <td><span class="pass">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>PeopleInSpace</strong></td>
+        <td>kmp</td>
+        <td>15</td>
+        <td>120.3s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td>0 (0E/0W)</td>
+        <td>0</td>
+        <td><span class="pass">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>kmp-production-sample</strong></td>
+        <td>kmp</td>
+        <td>15</td>
+        <td>4.2s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td>0 (0E/0W)</td>
+        <td>0</td>
+        <td><span class="pass">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>kotlinconf-app</strong></td>
+        <td>kmp</td>
+        <td>15</td>
+        <td>120.4s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td>0 (0E/0W)</td>
+        <td>0</td>
+        <td><span class="pass">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>kotlinx-coroutines</strong></td>
+        <td>kmp</td>
+        <td>15</td>
+        <td>120.4s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:2px;background:#dc3545"></div></div> 2%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:2px;background:#dc3545"></div></div> 2%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:100px;background:#28a745"></div></div> 100%</td>
+        <td>1 (0E/1W)</td>
+        <td>-</td>
+        <td><span class="pass">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>ktor</strong></td>
+        <td>kmp</td>
+        <td>15</td>
+        <td>97.4s</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td><div class="bar-bg"><div class="bar" style="width:0px;background:#dc3545"></div></div> 0%</td>
+        <td>-</td>
+        <td>0 (0E/0W)</td>
+        <td>-</td>
+        <td><span class="pass">OK</span></td>
+      </tr>
+  </tbody>
+</table>
+
+<h2>Regressions from Baseline</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Project</th>
+      <th>Feature</th>
+      <th>Baseline</th>
+      <th>Current</th>
+      <th>Delta</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td colspan="5">No regressions detected</td></tr>
+  </tbody>
+</table>
+</body>
+</html>

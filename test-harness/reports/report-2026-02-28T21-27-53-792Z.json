@@ -1,0 +1,719 @@
+{
+  "version": "1.5.0",
+  "timestamp": "2026-02-28T21:27:53.775Z",
+  "projects": {
+    "nowinandroid": {
+      "name": "nowinandroid",
+      "type": "android",
+      "files_tested": 15,
+      "startup_time_s": 120.403,
+      "server_crashed": false,
+      "hover": {
+        "total": 516,
+        "resolved": 0,
+        "unresolved": 516,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "definition": {
+        "total": 383,
+        "resolved": 0,
+        "unresolved": 383,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "diagnostics": {
+        "files_opened": 15,
+        "files_with_diagnostics": 0,
+        "total_diagnostics": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0,
+        "hints": 0,
+        "server_crashes": 0
+      },
+      "completion": {
+        "positions_tested": 252,
+        "non_empty": 252,
+        "empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "references": {
+        "total": 273,
+        "resolved": 0,
+        "unresolved": 273,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "symbols": {
+        "files_tested": 15,
+        "total_symbols": 0,
+        "files_with_symbols": 0,
+        "files_empty": 15,
+        "errors": 0,
+        "success_rate": 0
+      }
+    },
+    "compose-samples-jetsnack": {
+      "name": "compose-samples-jetsnack",
+      "type": "android",
+      "files_tested": 15,
+      "startup_time_s": 70.304,
+      "server_crashed": true,
+      "hover": {
+        "total": 657,
+        "resolved": 657,
+        "unresolved": 0,
+        "errors": 0,
+        "success_rate": 1
+      }
+    },
+    "compose-samples-jetcaster": {
+      "name": "compose-samples-jetcaster",
+      "type": "android",
+      "files_tested": 15,
+      "startup_time_s": 91.309,
+      "server_crashed": false,
+      "hover": {
+        "total": 381,
+        "resolved": 0,
+        "unresolved": 381,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "definition": {
+        "total": 288,
+        "resolved": 0,
+        "unresolved": 288,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "diagnostics": {
+        "files_opened": 15,
+        "files_with_diagnostics": 0,
+        "total_diagnostics": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0,
+        "hints": 0,
+        "server_crashes": 0
+      },
+      "completion": {
+        "positions_tested": 203,
+        "non_empty": 203,
+        "empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "symbols": {
+        "files_tested": 15,
+        "total_symbols": 0,
+        "files_with_symbols": 0,
+        "files_empty": 15,
+        "errors": 0,
+        "success_rate": 0
+      }
+    },
+    "NotyKT": {
+      "name": "NotyKT",
+      "type": "android",
+      "files_tested": 15,
+      "startup_time_s": 57.263,
+      "server_crashed": false,
+      "hover": {
+        "total": 599,
+        "resolved": 0,
+        "unresolved": 599,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "definition": {
+        "total": 413,
+        "resolved": 0,
+        "unresolved": 413,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "diagnostics": {
+        "files_opened": 15,
+        "files_with_diagnostics": 0,
+        "total_diagnostics": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0,
+        "hints": 0,
+        "server_crashes": 0
+      },
+      "completion": {
+        "positions_tested": 256,
+        "non_empty": 256,
+        "empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "references": {
+        "total": 288,
+        "resolved": 0,
+        "unresolved": 288,
+        "errors": 0,
+        "success_rate": 0
+      }
+    },
+    "Pokedex": {
+      "name": "Pokedex",
+      "type": "android",
+      "files_tested": 15,
+      "startup_time_s": 101.298,
+      "server_crashed": false,
+      "hover": {
+        "total": 505,
+        "resolved": 0,
+        "unresolved": 505,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "definition": {
+        "total": 338,
+        "resolved": 0,
+        "unresolved": 338,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "diagnostics": {
+        "files_opened": 15,
+        "files_with_diagnostics": 0,
+        "total_diagnostics": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0,
+        "hints": 0,
+        "server_crashes": 0
+      },
+      "completion": {
+        "positions_tested": 247,
+        "non_empty": 247,
+        "empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "references": {
+        "total": 247,
+        "resolved": 0,
+        "unresolved": 247,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "symbols": {
+        "files_tested": 15,
+        "total_symbols": 0,
+        "files_with_symbols": 0,
+        "files_empty": 15,
+        "errors": 0,
+        "success_rate": 0
+      }
+    },
+    "spring-realworld": {
+      "name": "spring-realworld",
+      "type": "jvm",
+      "files_tested": 15,
+      "startup_time_s": 1.206,
+      "server_crashed": false,
+      "hover": {
+        "total": 518,
+        "resolved": 400,
+        "unresolved": 118,
+        "errors": 0,
+        "success_rate": 0.7722007722007722
+      },
+      "definition": {
+        "total": 385,
+        "resolved": 294,
+        "unresolved": 91,
+        "errors": 0,
+        "success_rate": 0.7636363636363637
+      },
+      "diagnostics": {
+        "files_opened": 15,
+        "files_with_diagnostics": 15,
+        "total_diagnostics": 386,
+        "errors": 367,
+        "warnings": 19,
+        "info": 0,
+        "hints": 0,
+        "server_crashes": 0
+      },
+      "completion": {
+        "positions_tested": 249,
+        "non_empty": 249,
+        "empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "references": {
+        "total": 277,
+        "resolved": 218,
+        "unresolved": 59,
+        "errors": 0,
+        "success_rate": 0.7870036101083032
+      },
+      "symbols": {
+        "files_tested": 15,
+        "total_symbols": 71,
+        "files_with_symbols": 15,
+        "files_empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      }
+    },
+    "spring-boot-kotlin-boilerplate": {
+      "name": "spring-boot-kotlin-boilerplate",
+      "type": "jvm",
+      "files_tested": 15,
+      "startup_time_s": 120.328,
+      "server_crashed": false,
+      "hover": {
+        "total": 430,
+        "resolved": 430,
+        "unresolved": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "definition": {
+        "total": 324,
+        "resolved": 324,
+        "unresolved": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "diagnostics": {
+        "files_opened": 15,
+        "files_with_diagnostics": 0,
+        "total_diagnostics": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0,
+        "hints": 0,
+        "server_crashes": 0
+      },
+      "completion": {
+        "positions_tested": 248,
+        "non_empty": 248,
+        "empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "references": {
+        "total": 240,
+        "resolved": 212,
+        "unresolved": 28,
+        "errors": 0,
+        "success_rate": 0.8833333333333333
+      },
+      "symbols": {
+        "files_tested": 15,
+        "total_symbols": 59,
+        "files_with_symbols": 15,
+        "files_empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      }
+    },
+    "spring-boot-kotlin-demo": {
+      "name": "spring-boot-kotlin-demo",
+      "type": "jvm",
+      "files_tested": 4,
+      "startup_time_s": 60.264,
+      "server_crashed": false,
+      "hover": {
+        "total": 90,
+        "resolved": 89,
+        "unresolved": 1,
+        "errors": 0,
+        "success_rate": 0.9888888888888889
+      },
+      "definition": {
+        "total": 70,
+        "resolved": 70,
+        "unresolved": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "diagnostics": {
+        "files_opened": 4,
+        "files_with_diagnostics": 0,
+        "total_diagnostics": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0,
+        "hints": 0,
+        "server_crashes": 0
+      },
+      "completion": {
+        "positions_tested": 51,
+        "non_empty": 51,
+        "empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "references": {
+        "total": 60,
+        "resolved": 59,
+        "unresolved": 1,
+        "errors": 0,
+        "success_rate": 0.9833333333333333
+      },
+      "symbols": {
+        "files_tested": 4,
+        "total_symbols": 10,
+        "files_with_symbols": 4,
+        "files_empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      }
+    },
+    "spring-guides-kotlin": {
+      "name": "spring-guides-kotlin",
+      "type": "jvm",
+      "files_tested": 8,
+      "startup_time_s": 59.263,
+      "server_crashed": false,
+      "hover": {
+        "total": 268,
+        "resolved": 267,
+        "unresolved": 1,
+        "errors": 0,
+        "success_rate": 0.996268656716418
+      },
+      "definition": {
+        "total": 200,
+        "resolved": 200,
+        "unresolved": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "diagnostics": {
+        "files_opened": 8,
+        "files_with_diagnostics": 0,
+        "total_diagnostics": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0,
+        "hints": 0,
+        "server_crashes": 0
+      },
+      "completion": {
+        "positions_tested": 120,
+        "non_empty": 120,
+        "empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "references": {
+        "total": 146,
+        "resolved": 144,
+        "unresolved": 2,
+        "errors": 0,
+        "success_rate": 0.9863013698630136
+      },
+      "symbols": {
+        "files_tested": 8,
+        "total_symbols": 31,
+        "files_with_symbols": 8,
+        "files_empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      }
+    },
+    "spring-petclinic-kotlin": {
+      "name": "spring-petclinic-kotlin",
+      "type": "jvm",
+      "files_tested": 15,
+      "startup_time_s": 30.237,
+      "server_crashed": false,
+      "hover": {
+        "total": 341,
+        "resolved": 228,
+        "unresolved": 113,
+        "errors": 0,
+        "success_rate": 0.6686217008797654
+      },
+      "definition": {
+        "total": 299,
+        "resolved": 184,
+        "unresolved": 115,
+        "errors": 0,
+        "success_rate": 0.6153846153846154
+      },
+      "diagnostics": {
+        "files_opened": 15,
+        "files_with_diagnostics": 14,
+        "total_diagnostics": 178,
+        "errors": 174,
+        "warnings": 4,
+        "info": 0,
+        "hints": 0,
+        "server_crashes": 0
+      },
+      "completion": {
+        "positions_tested": 230,
+        "non_empty": 230,
+        "empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "references": {
+        "total": 245,
+        "resolved": 157,
+        "unresolved": 88,
+        "errors": 0,
+        "success_rate": 0.6408163265306123
+      },
+      "symbols": {
+        "files_tested": 15,
+        "total_symbols": 29,
+        "files_with_symbols": 15,
+        "files_empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      }
+    },
+    "PeopleInSpace": {
+      "name": "PeopleInSpace",
+      "type": "kmp",
+      "files_tested": 15,
+      "startup_time_s": 120.349,
+      "server_crashed": false,
+      "hover": {
+        "total": 533,
+        "resolved": 0,
+        "unresolved": 533,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "definition": {
+        "total": 348,
+        "resolved": 0,
+        "unresolved": 348,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "diagnostics": {
+        "files_opened": 15,
+        "files_with_diagnostics": 0,
+        "total_diagnostics": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0,
+        "hints": 0,
+        "server_crashes": 0
+      },
+      "completion": {
+        "positions_tested": 238,
+        "non_empty": 238,
+        "empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "references": {
+        "total": 247,
+        "resolved": 0,
+        "unresolved": 247,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "symbols": {
+        "files_tested": 15,
+        "total_symbols": 0,
+        "files_with_symbols": 0,
+        "files_empty": 15,
+        "errors": 0,
+        "success_rate": 0
+      }
+    },
+    "kmp-production-sample": {
+      "name": "kmp-production-sample",
+      "type": "kmp",
+      "files_tested": 15,
+      "startup_time_s": 4.217,
+      "server_crashed": false,
+      "hover": {
+        "total": 633,
+        "resolved": 0,
+        "unresolved": 633,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "definition": {
+        "total": 409,
+        "resolved": 0,
+        "unresolved": 409,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "diagnostics": {
+        "files_opened": 15,
+        "files_with_diagnostics": 0,
+        "total_diagnostics": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0,
+        "hints": 0,
+        "server_crashes": 0
+      },
+      "completion": {
+        "positions_tested": 283,
+        "non_empty": 283,
+        "empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "symbols": {
+        "files_tested": 15,
+        "total_symbols": 0,
+        "files_with_symbols": 0,
+        "files_empty": 15,
+        "errors": 0,
+        "success_rate": 0
+      }
+    },
+    "kotlinconf-app": {
+      "name": "kotlinconf-app",
+      "type": "kmp",
+      "files_tested": 15,
+      "startup_time_s": 120.428,
+      "server_crashed": false,
+      "hover": {
+        "total": 433,
+        "resolved": 0,
+        "unresolved": 433,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "definition": {
+        "total": 354,
+        "resolved": 0,
+        "unresolved": 354,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "diagnostics": {
+        "files_opened": 15,
+        "files_with_diagnostics": 0,
+        "total_diagnostics": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0,
+        "hints": 0,
+        "server_crashes": 0
+      },
+      "completion": {
+        "positions_tested": 243,
+        "non_empty": 243,
+        "empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "references": {
+        "total": 269,
+        "resolved": 0,
+        "unresolved": 269,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "symbols": {
+        "files_tested": 15,
+        "total_symbols": 0,
+        "files_with_symbols": 0,
+        "files_empty": 15,
+        "errors": 0,
+        "success_rate": 0
+      }
+    },
+    "kotlinx-coroutines": {
+      "name": "kotlinx-coroutines",
+      "type": "kmp",
+      "files_tested": 15,
+      "startup_time_s": 120.42,
+      "server_crashed": false,
+      "hover": {
+        "total": 474,
+        "resolved": 8,
+        "unresolved": 466,
+        "errors": 0,
+        "success_rate": 0.016877637130801686
+      },
+      "definition": {
+        "total": 328,
+        "resolved": 8,
+        "unresolved": 320,
+        "errors": 0,
+        "success_rate": 0.024390243902439025
+      },
+      "diagnostics": {
+        "files_opened": 15,
+        "files_with_diagnostics": 1,
+        "total_diagnostics": 1,
+        "errors": 0,
+        "warnings": 1,
+        "info": 0,
+        "hints": 0,
+        "server_crashes": 0
+      },
+      "completion": {
+        "positions_tested": 231,
+        "non_empty": 231,
+        "empty": 0,
+        "errors": 0,
+        "success_rate": 1
+      },
+      "references": {
+        "total": 235,
+        "resolved": 8,
+        "unresolved": 227,
+        "errors": 0,
+        "success_rate": 0.03404255319148936
+      }
+    },
+    "ktor": {
+      "name": "ktor",
+      "type": "kmp",
+      "files_tested": 15,
+      "startup_time_s": 97.375,
+      "server_crashed": false,
+      "hover": {
+        "total": 688,
+        "resolved": 0,
+        "unresolved": 688,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "definition": {
+        "total": 434,
+        "resolved": 0,
+        "unresolved": 434,
+        "errors": 0,
+        "success_rate": 0
+      },
+      "diagnostics": {
+        "files_opened": 15,
+        "files_with_diagnostics": 0,
+        "total_diagnostics": 0,
+        "errors": 0,
+        "warnings": 0,
+        "info": 0,
+        "hints": 0,
+        "server_crashes": 0
+      }
+    }
+  },
+  "summary": {
+    "projects_tested": 15,
+    "projects_passed": 14,
+    "projects_failed": 1,
+    "overall_hover_rate": 0.3628571770544431,
+    "overall_definition_rate": 0.3145293730659584,
+    "overall_completion_rate": 1,
+    "regressions_from_baseline": []
+  }
+}

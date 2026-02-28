@@ -23,7 +23,6 @@ out/
 test-harness/node_modules/
 test-harness/dist/
 test-harness/.projects/
-test-harness/reports/
 
 # OS
 .DS_Store
