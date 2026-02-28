@@ -68,6 +68,7 @@ class KlibStubGenerator {
                         parts.dropLast(1).joinToString("/")
                             .replace("root_package/", "")
                             .replace("root_package", "")
+                            .replaceFirst(Regex("^package_"), "") // strip klib package_ prefix
                             .replace("/", ".")
                             .trimEnd('.')
                     } else ""

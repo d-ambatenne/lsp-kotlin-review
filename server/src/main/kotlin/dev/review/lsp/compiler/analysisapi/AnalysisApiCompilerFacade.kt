@@ -101,7 +101,7 @@ class AnalysisApiCompilerFacade(
         val klibStubRoots = if (klibFiles.isNotEmpty()) {
             val stubGen = KlibStubGenerator()
             System.err.println("[session] Generating stubs for ${klibFiles.size} klib files...")
-            klibFiles.mapNotNull { klib ->
+            val roots = klibFiles.mapNotNull { klib ->
                 try {
                     stubGen.generateStubs(klib)
                 } catch (e: Exception) {
@@ -109,6 +109,20 @@ class AnalysisApiCompilerFacade(
                     null
                 }
             }
+            // Log first few stub roots with sample content for debugging
+            if (roots.isNotEmpty()) {
+                for (root in roots.take(3)) {
+                    try {
+                        val files = java.nio.file.Files.walk(root).filter { it.toString().endsWith(".kt") }.toList()
+                        System.err.println("[session] klib stub root $root: ${files.size} .kt files")
+                        files.firstOrNull()?.let { f ->
+                            val content = java.nio.file.Files.readString(f)
+                            System.err.println("[session] Sample stub (${f.fileName}): ${content.take(200)}")
+                        }
+                    } catch (_: Exception) { }
+                }
+            }
+            roots
         } else emptyList()
 
         // Extract classes.jar from AAR files (Android Archive bundles)
