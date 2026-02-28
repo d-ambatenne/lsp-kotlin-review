@@ -4,6 +4,26 @@ All notable changes to the Kotlin Review LSP extension will be documented in thi
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.5.0] - 2026-02-28
+
+### Added
+
+- **Kotlin keyword completions**: 50+ keywords (val, var, fun, class, if, when, etc.) with smart insert text. Labeled "Kotlin · Description", sorted to top of completion list, excluded during dot completion. Includes KMP keywords (expect, actual).
+- **Klib-to-stub generator**: reads `.klib` metadata (ProtoBuf PackageFragment) from ZIP archives and generates Kotlin stub files as source roots. Enables resolution of iOS-specific APIs like `ComposeUIViewController` from native klibs. Architecture variants (Arm64/SimArm64) deduplicated.
+
+### Changed
+
+- **Analysis API upgraded from 2.1.0 to 2.3.0**: fixes library metadata resolution for projects using Kotlin 2.3.0. All 12 `-for-ide` artifacts bumped. Removed kotlin-stdlib version replacement hack and FIR checker patches (no longer needed).
+- **Gradle 8.14+ compatibility**: init script uses `project.configurations` (not bare `configurations`) and `--no-configuration-cache` flag for config cache compatibility.
+- **KMP detection**: checks `src/commonMain/kotlin` directory (definitive) + version catalog aliases (`kotlinMultiplatform`). Resolves `metadata*CompileClasspath`, `*CompileKlibraries`, and `*MainApi` configs for broader coverage.
+- **KMP sessions use correct platform types**: `JsPlatforms.defaultJsPlatform` for JS, `NativePlatforms.unspecifiedNativePlatform` for Native (was JVM fallback for all).
+
+### Improved
+
+- **Diagnostics performance**: skip didChange (session immutable — results identical until save), async on didOpen with per-file cache, concurrent rebuild guard instead of time-based cooldown.
+- **Session rebuild speed**: klib stub generation and AAR extraction cached across rebuilds. Only Analysis API session itself is rebuilt on save (~0.5s vs ~3s before).
+- **All library binary roots use absolute paths**: prevents IntelliJ VFS relative path resolution issues.
+
 ## [0.70.0] - 2026-02-26
 
 ### Added

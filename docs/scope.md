@@ -35,6 +35,10 @@
 
 ### P3 - Implemented Later (continued)
 23. Kotlin Multiplatform support: per-target Analysis API sessions (JVM, Android, iOS/Native, JS), KMP detection, per-target classpath resolution, expect/actual navigation, per-file platform indicator (ADR-24) — added in 0.70.0
+24. Analysis API upgrade 2.1.0 → 2.3.0: library metadata resolution for modern Kotlin projects — added in 0.90.0
+25. Klib-to-stub generator: native/JS library resolution from .klib metadata (ProtoBuf) — added in 0.91.0
+26. Kotlin keyword completions: 50+ keywords with smart insert text — added in 0.98.0
+27. Diagnostics performance: async + caching + skip didChange + klib/AAR rebuild caching — added in 1.0.0
 
 ### Explicitly Out of Scope
 - Snippet completion, code generation, refactoring (extract method/variable)

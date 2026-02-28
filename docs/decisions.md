@@ -160,3 +160,14 @@ The only reliable path is `_session = buildSession()` which re-reads all files f
 - Expect/actual navigation: `findExpectActualCounterparts()` searches across sessions by FQN matching + expect/actual modifier detection. Wired into go-to-implementation, hover, and references.
 - Per-file platform indicator: VS Code status bar shows `Kotlin: jvmMain` etc., with target switching for common files.
 **Trade-off**: Multiple sessions increase memory usage (~500-800 MB per session). 4-target KMP project may need `-Xmx3g`. Session rebuild on save rebuilds all sessions.
+
+## ADR-25: Klib-to-Stub Generation for Native/JS Library Resolution
+**Decision**: Generate Kotlin source stubs from `.klib` metadata to enable resolution of platform-specific symbols (like `ComposeUIViewController` for iOS) that only exist in native klib format. Read klibs directly as ZIP archives, parse ProtoBuf `PackageFragment` messages, and generate minimal stub files added as source roots.
+**Rationale**: The Analysis API's `addBinaryRoot` only supports JARs, not klibs. iOS/Native libraries are distributed as `.klib` files containing serialized Kotlin metadata. Without stub generation, all native-specific APIs would be unresolved. The stub approach reuses the existing source module infrastructure — no Analysis API modifications needed.
+**Key details**: `ProtoBuf.Type.className` is a QualifiedNameTable index (not StringTable). Klib linkdata directories use `package_<name>/` prefix that must be stripped. Architecture variants (Arm64/SimArm64) are deduplicated to avoid overload ambiguity. Stubs are cached across session rebuilds.
+**Trade-off**: Generated stubs lack full type fidelity (type parameters rendered as `Any`, some complex types simplified). Sufficient for hover/diagnostics/navigation in code review.
+
+## ADR-26: Diagnostics Performance — Async + Caching + Rebuild Guard
+**Decision**: Skip diagnostics on `didChange` (session immutable — ADR-16), serve cached diagnostics on `didOpen`, compute fresh diagnostics asynchronously, and guard against concurrent session rebuilds.
+**Rationale**: The Analysis API session is immutable after creation. `collectDiagnostics` on `didChange` returns identical results to the last `didSave`, wasting the single analysis thread. Auto-save triggers `didSave` frequently, causing cascading session rebuilds. Klib stub generation and AAR extraction are cached across rebuilds since they don't change between saves.
+**Trade-off**: Diagnostics only update on save (not on each keystroke). Acceptable for a code review tool. A concurrent rebuild guard (not time-based cooldown) ensures every save triggers a rebuild while preventing cascades.
