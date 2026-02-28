@@ -1264,31 +1264,30 @@ class AnalysisApiCompilerFacade(
         }
     }
 
-    @Volatile private var lastRebuildTime = 0L
-    private val rebuildCooldownMs = 5000L // Don't rebuild more than once per 5 seconds
+    @Volatile private var rebuildInProgress = false
 
     override fun refreshAnalysis() {
         // The standalone Analysis API's PSI/FIR are immutable after session creation.
         // The only way to pick up file changes is to rebuild all sessions from disk.
-        val now = System.currentTimeMillis()
-        if (now - lastRebuildTime < rebuildCooldownMs) {
-            System.err.println("[session] Skipping rebuild (cooldown: ${rebuildCooldownMs}ms)")
+        // Skip if a rebuild is already in progress (prevents auto-save cascading).
+        if (rebuildInProgress) {
             return
         }
-        lastRebuildTime = now
+        rebuildInProgress = true
 
         synchronized(symbolCache) {
             symbolCache.clear()
         }
         try {
             runOnAnalysisThread {
-                // Release old sessions to free memory before building new ones
                 sessions = emptyMap()
                 System.gc()
                 sessions = buildSessions()
             }
         } catch (e: Exception) {
             System.err.println("Session rebuild failed: ${e.message}")
+        } finally {
+            rebuildInProgress = false
         }
     }
 
