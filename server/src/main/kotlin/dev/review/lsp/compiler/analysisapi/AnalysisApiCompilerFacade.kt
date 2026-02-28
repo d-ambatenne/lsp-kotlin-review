@@ -66,6 +66,10 @@ class AnalysisApiCompilerFacade(
     private val session: org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession
         get() = sessions.values.firstOrNull() ?: throw IllegalStateException("No analysis session available")
 
+    // Caches for expensive operations — persist across session rebuilds (must be before init)
+    private val klibStubCache = ConcurrentHashMap<String, List<Path>>()
+    private val aarExtractionCache = ConcurrentHashMap<Path, Path?>()
+
     init {
         sessions = buildSessions()
     }
@@ -87,10 +91,6 @@ class AnalysisApiCompilerFacade(
             null
         }
     }
-
-    // Caches for expensive operations — persist across session rebuilds
-    private val klibStubCache = ConcurrentHashMap<String, List<Path>>() // normalized klib set key → stub roots
-    private val aarExtractionCache = ConcurrentHashMap<Path, Path?>() // aar path → extracted classes.jar
 
     private fun buildSingleSession(
         targetPlatform: org.jetbrains.kotlin.platform.TargetPlatform,
