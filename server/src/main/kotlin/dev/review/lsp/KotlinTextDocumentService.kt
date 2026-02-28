@@ -117,15 +117,13 @@ class KotlinTextDocumentService : TextDocumentService {
         val uri = params.textDocument.uri
         val path = UriUtil.toPath(uri)
 
-        // Invalidate diagnostic cache — session is about to be rebuilt
+        // Don't rebuild sessions on every save — the session only needs rebuilding
+        // when build files change (handled by workspace file watchers). For a code
+        // review tool, the initial session is sufficient for most operations.
+        // Just invalidate the diagnostic cache and re-analyze with existing session.
         diagnosticsPublisher?.invalidateCache()
-
-        // Rebuild analysis session from disk to pick up saved changes
-        f.refreshAnalysis()
-
-        // Re-publish diagnostics with the rebuilt session
         val version = documentVersions[uri] ?: 0
-        diagnosticsPublisher?.publishDiagnostics(path, uri, version) { documentVersions[uri] }
+        diagnosticsPublisher?.publishDiagnosticsAsync(path, uri, version) { documentVersions[uri] }
     }
 
     // P0 features
