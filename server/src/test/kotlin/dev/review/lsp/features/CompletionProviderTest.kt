@@ -84,7 +84,7 @@ class CompletionProviderTest {
 
         val valItem = items.first { it.label == "val" }
         assertEquals("val ", valItem.insertText)
-        assertEquals("Immutable variable", valItem.detail)
+        assertEquals("Kotlin · Immutable variable", valItem.detail)
 
         val ifItem = items.first { it.label == "if" }
         assertEquals("if (", ifItem.insertText)

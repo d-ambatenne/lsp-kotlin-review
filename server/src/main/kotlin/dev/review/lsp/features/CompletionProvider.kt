@@ -53,9 +53,9 @@ class CompletionProvider(private val facade: CompilerFacade) {
         return KOTLIN_KEYWORDS.map { (keyword, detail, insertText) ->
             CompletionItem(keyword).apply {
                 kind = CompletionItemKind.Keyword
-                this.detail = detail
+                this.detail = "Kotlin · $detail"
                 this.insertText = insertText
-                sortText = "5_$keyword" // after scope symbols (0-3) but before low-priority
+                sortText = "0_keyword_$keyword" // top of the list for Kotlin projects
             }
         }
     }
