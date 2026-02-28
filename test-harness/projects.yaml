@@ -1,0 +1,34 @@
+projects:
+  - name: NotyKT
+    repo: https://github.com/AmarjitGhuman/NotyKT
+    branch: main
+    type: android
+    subdir: noty-android
+    features: [hover, definition, diagnostics, completion, references]
+
+  - name: kotlinx-coroutines
+    repo: https://github.com/Kotlin/kotlinx.coroutines
+    branch: master
+    type: jvm
+    subdir: ""
+    features: [hover, definition, diagnostics, completion, references]
+
+  - name: ktor
+    repo: https://github.com/ktorio/ktor
+    branch: main
+    type: kmp
+    features: [hover, definition, diagnostics]
+
+  - name: compose-samples
+    repo: https://github.com/android/compose-samples
+    branch: main
+    type: android
+    subdir: Jetsnack
+    features: [hover, definition, diagnostics, completion]
+
+thresholds:
+  hover_success_rate: 0.7
+  definition_success_rate: 0.6
+  diagnostics_no_crash: true
+  completion_non_empty: 0.8
+  startup_time_max_s: 30

@@ -19,6 +19,12 @@ out/
 *.iml
 .vscode/.settings/
 
+# Test harness
+test-harness/node_modules/
+test-harness/dist/
+test-harness/.projects/
+test-harness/reports/
+
 # OS
 .DS_Store
 Thumbs.db

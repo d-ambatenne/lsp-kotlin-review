@@ -1,0 +1,25 @@
+{
+  "name": "lsp-kotlin-test-harness",
+  "version": "1.0.0",
+  "description": "E2E test harness for multi-project LSP validation",
+  "bin": {
+    "test-harness": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "commander": "^13.1.0",
+    "glob": "^11.0.1",
+    "vscode-jsonrpc": "^8.2.1",
+    "vscode-languageserver-protocol": "^3.17.5",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "typescript": "^5.7.0"
+  }
+}
