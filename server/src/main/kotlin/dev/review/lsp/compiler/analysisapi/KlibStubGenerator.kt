@@ -12,16 +12,9 @@ import java.nio.file.Path
  * Klib files contain serialized ProtoBuf metadata for declarations.
  * This generator extracts class, function, and property signatures
  * and writes minimal Kotlin source stubs that the Analysis API can parse.
- *
- * This enables resolution of platform-specific symbols (like
- * ComposeUIViewController for iOS) that only exist in .klib format.
  */
 class KlibStubGenerator {
 
-    /**
-     * Generate Kotlin stubs from a klib file into a temporary directory.
-     * Returns the directory path to be added as a source root, or null on failure.
-     */
     fun generateStubs(klibPath: Path): Path? {
         return try {
             val metadata = loadKlib(klibPath) ?: return null
@@ -35,9 +28,7 @@ class KlibStubGenerator {
                         if (generateFragmentStub(outputDir, pkgFqName, fragment)) {
                             stubCount++
                         }
-                    } catch (e: Exception) {
-                        // Skip individual fragments that fail to parse
-                    }
+                    } catch (_: Exception) { }
                 }
             }
 
@@ -48,52 +39,41 @@ class KlibStubGenerator {
         }
     }
 
-    /**
-     * Klib metadata read directly from ZIP — no KlibLoader dependency.
-     */
     private data class KlibMetadata(
         val moduleHeader: ByteArray,
-        val packages: Map<String, List<ByteArray>> // packageFqName -> list of fragment bytes
+        val packages: Map<String, List<ByteArray>>
     )
 
     private fun loadKlib(klibPath: Path): KlibMetadata? {
         return try {
-            val zipFile = java.util.zip.ZipFile(klibPath.toFile())
-            zipFile.use { zip ->
-                // Find the component directory (usually "default/" or the library name)
+            java.util.zip.ZipFile(klibPath.toFile()).use { zip ->
                 val entries = zip.entries().toList()
-                val linkdataEntries = entries.filter { it.name.contains("/linkdata/") || it.name.startsWith("linkdata/") }
+                val linkdataEntries = entries.filter {
+                    it.name.contains("/linkdata/") || it.name.startsWith("linkdata/")
+                }
                 if (linkdataEntries.isEmpty()) return null
 
-                // Determine the component prefix (e.g., "default/" or "")
                 val prefix = linkdataEntries.first().name.substringBefore("linkdata/")
-
-                // Read module header
                 val moduleEntry = zip.getEntry("${prefix}linkdata/module") ?: return null
                 val moduleHeader = zip.getInputStream(moduleEntry).readBytes()
 
-                // Read package fragments
                 val packages = mutableMapOf<String, MutableList<ByteArray>>()
                 for (entry in linkdataEntries) {
                     if (entry.isDirectory) continue
                     val relativePath = entry.name.removePrefix(prefix).removePrefix("linkdata/")
-                    if (relativePath == "module") continue
-                    if (!relativePath.endsWith(".knm")) continue
+                    if (relativePath == "module" || !relativePath.endsWith(".knm")) continue
 
-                    // Extract package name from path: "root_package/com/example/0_Foo.knm"
-                    // or "package_com.example/0_Foo.knm"
                     val parts = relativePath.split("/")
                     val pkgFqName = if (parts.size >= 2) {
-                        val dirName = parts.dropLast(1).joinToString("/")
-                        // Convert directory path to package FQN
-                        dirName.replace("root_package/", "")
+                        parts.dropLast(1).joinToString("/")
+                            .replace("root_package/", "")
                             .replace("root_package", "")
                             .replace("/", ".")
                             .trimEnd('.')
                     } else ""
 
-                    val bytes = zip.getInputStream(entry).readBytes()
-                    packages.getOrPut(pkgFqName) { mutableListOf() }.add(bytes)
+                    packages.getOrPut(pkgFqName) { mutableListOf() }
+                        .add(zip.getInputStream(entry).readBytes())
                 }
 
                 KlibMetadata(moduleHeader, packages)
@@ -104,262 +84,173 @@ class KlibStubGenerator {
         }
     }
 
-    private fun generateFragmentStub(
-        outputDir: Path,
-        pkgFqName: String,
-        fragment: ProtoBuf.PackageFragment
-    ): Boolean {
+    // ---- Context for name resolution ----
+
+    private class Ctx(
+        val strings: ProtoBuf.StringTable,
+        val qNames: ProtoBuf.QualifiedNameTable
+    )
+
+    // ---- Stub generation ----
+
+    private fun generateFragmentStub(outputDir: Path, pkgFqName: String, fragment: ProtoBuf.PackageFragment): Boolean {
+        val ctx = Ctx(fragment.strings, fragment.qualifiedNames)
         val sb = StringBuilder()
         if (pkgFqName.isNotEmpty()) {
             sb.appendLine("package $pkgFqName")
             sb.appendLine()
         }
 
-        val nameResolver = fragment.strings
-        val qualifiedNameTable = fragment.qualifiedNames
-
-        // Generate class stubs
         for (cls in fragment.class_List) {
-            try {
-                generateClassStub(sb, cls, nameResolver, qualifiedNameTable, "")
-            } catch (_: Exception) { /* skip problematic declarations */ }
+            try { generateClass(sb, cls, ctx, "") } catch (_: Exception) { }
         }
 
-        // Generate top-level function stubs
         if (fragment.hasPackage()) {
             val pkg = fragment.`package`
             for (fn in pkg.functionList) {
-                try {
-                    generateFunctionStub(sb, fn, nameResolver, "")
-                } catch (_: Exception) { /* skip */ }
+                try { generateFunction(sb, fn, ctx, "") } catch (_: Exception) { }
             }
             for (prop in pkg.propertyList) {
-                try {
-                    generatePropertyStub(sb, prop, nameResolver, "")
-                } catch (_: Exception) { /* skip */ }
+                try { generateProperty(sb, prop, ctx, "") } catch (_: Exception) { }
             }
         }
 
         val content = sb.toString().trim()
         if (content.isNotEmpty() && content != "package $pkgFqName") {
-            // Write to file
             val pkgDir = outputDir.resolve(pkgFqName.replace('.', '/'))
             Files.createDirectories(pkgDir)
-            val fileName = "stubs_${pkgFqName.replace('.', '_')}_${System.nanoTime()}.kt"
-            Files.writeString(pkgDir.resolve(fileName), content)
+            Files.writeString(pkgDir.resolve("stubs_${System.nanoTime()}.kt"), content)
             return true
         }
         return false
     }
 
-    private fun generateClassStub(
-        sb: StringBuilder,
-        cls: ProtoBuf.Class,
-        nameResolver: ProtoBuf.StringTable,
-        qualifiedNameTable: ProtoBuf.QualifiedNameTable,
-        indent: String
-    ) {
-        val className = resolveClassName(cls.fqName, qualifiedNameTable, nameResolver)
-            ?: return
+    private fun generateClass(sb: StringBuilder, cls: ProtoBuf.Class, ctx: Ctx, indent: String) {
+        val className = resolveQName(cls.fqName, ctx) ?: return
         val shortName = className.substringAfterLast('.')
 
-        val visibility = getVisibility(Flags.VISIBILITY.get(cls.flags))
-        if (visibility == "private" || visibility == "internal") return
+        val vis = visibility(Flags.VISIBILITY.get(cls.flags))
+        if (vis == "private " || vis == "internal ") return
 
-        val modality = getModality(Flags.MODALITY.get(cls.flags))
-        val classKind = Flags.CLASS_KIND.get(cls.flags)
-
-        val kindStr = when (classKind) {
+        val kind = Flags.CLASS_KIND.get(cls.flags)
+        val mod = modality(Flags.MODALITY.get(cls.flags))
+        val kindStr = when (kind) {
             ProtoBuf.Class.Kind.INTERFACE -> "interface"
             ProtoBuf.Class.Kind.ENUM_CLASS -> "enum class"
             ProtoBuf.Class.Kind.ANNOTATION_CLASS -> "annotation class"
             ProtoBuf.Class.Kind.OBJECT -> "object"
             ProtoBuf.Class.Kind.COMPANION_OBJECT -> "companion object"
-            ProtoBuf.Class.Kind.ENUM_ENTRY -> return // skip enum entries
-            else -> "${modality}class"
+            ProtoBuf.Class.Kind.ENUM_ENTRY -> return
+            else -> "${mod}class"
         }
 
-        val typeParams = renderTypeParameters(cls.typeParameterList, nameResolver)
+        val tps = typeParams(cls.typeParameterList, ctx)
+        sb.append("${indent}${vis}${kindStr} $shortName$tps")
 
-        sb.append("${indent}${visibility}${kindStr} $shortName$typeParams")
-
-        // Supertypes
-        val supertypes = cls.supertypeList
-            .mapNotNull { renderType(it, nameResolver, qualifiedNameTable) }
+        val supers = cls.supertypeList.mapNotNull { renderType(it, ctx) }
             .filter { it != "Any" && it != "kotlin.Any" }
-        if (supertypes.isNotEmpty()) {
-            sb.append(" : ${supertypes.joinToString(", ")}")
-        }
+        if (supers.isNotEmpty()) sb.append(" : ${supers.joinToString(", ")}")
 
         sb.appendLine(" {")
-
-        // Constructor parameters (primary constructor)
-        for (constructor in cls.constructorList) {
-            if (!Flags.IS_SECONDARY.get(constructor.flags)) {
-                // Primary constructor — skip rendering, params are complex
-            }
-        }
-
-        // Member functions
         for (fn in cls.functionList) {
-            try {
-                generateFunctionStub(sb, fn, nameResolver, "$indent    ")
-            } catch (_: Exception) { /* skip */ }
+            try { generateFunction(sb, fn, ctx, "$indent    ") } catch (_: Exception) { }
         }
-
-        // Member properties
         for (prop in cls.propertyList) {
-            try {
-                generatePropertyStub(sb, prop, nameResolver, "$indent    ")
-            } catch (_: Exception) { /* skip */ }
+            try { generateProperty(sb, prop, ctx, "$indent    ") } catch (_: Exception) { }
         }
-
-        // Nested classes
-        for (nested in cls.nestedClassNameList) {
-            // Just the name reference, no full declaration available here
-        }
-
         sb.appendLine("$indent}")
         sb.appendLine()
     }
 
-    private fun generateFunctionStub(
-        sb: StringBuilder,
-        fn: ProtoBuf.Function,
-        nameResolver: ProtoBuf.StringTable,
-        indent: String
-    ) {
-        val name = resolveString(fn.name, nameResolver) ?: return
-        val visibility = getVisibility(Flags.VISIBILITY.get(fn.flags))
-        if (visibility == "private" || visibility == "internal") return
+    private fun generateFunction(sb: StringBuilder, fn: ProtoBuf.Function, ctx: Ctx, indent: String) {
+        val name = str(fn.name, ctx) ?: return
+        val vis = visibility(Flags.VISIBILITY.get(fn.flags))
+        if (vis == "private " || vis == "internal ") return
 
-        val modality = getModality(Flags.MODALITY.get(fn.flags))
-        val isSuspend = Flags.IS_SUSPEND.get(fn.flags)
-        val suspendStr = if (isSuspend) "suspend " else ""
+        val mod = modality(Flags.MODALITY.get(fn.flags))
+        val susp = if (Flags.IS_SUSPEND.get(fn.flags)) "suspend " else ""
+        val tps = typeParams(fn.typeParameterList, ctx)
 
-        val typeParams = renderTypeParameters(fn.typeParameterList, nameResolver)
-
-        // Extension receiver
-        val receiverStr = if (fn.hasReceiverType()) {
-            val recType = renderTypeSimple(fn.receiverType, nameResolver)
-            "$recType."
-        } else ""
-
-        // Parameters
-        val params = fn.valueParameterList.mapNotNull { param ->
-            val paramName = resolveString(param.name, nameResolver) ?: "p"
-            val paramType = if (param.hasType()) renderTypeSimple(param.type, nameResolver) else "Any?"
-            "$paramName: $paramType"
+        val recv = if (fn.hasReceiverType()) "${renderType(fn.receiverType, ctx) ?: "Any"}." else ""
+        val params = fn.valueParameterList.joinToString(", ") { p ->
+            val pName = str(p.name, ctx) ?: "p"
+            val pType = if (p.hasType()) renderType(p.type, ctx) ?: "Any?" else "Any?"
+            "$pName: $pType"
         }
+        val ret = if (fn.hasReturnType()) renderType(fn.returnType, ctx) ?: "Unit" else "Unit"
 
-        // Return type
-        val returnType = if (fn.hasReturnType()) renderTypeSimple(fn.returnType, nameResolver) else "Unit"
-
-        sb.appendLine("${indent}${visibility}${suspendStr}${modality}fun $typeParams${receiverStr}$name(${params.joinToString(", ")}): $returnType = TODO()")
+        sb.appendLine("${indent}${vis}${susp}${mod}fun $tps${recv}${name}(${params}): $ret = TODO()")
     }
 
-    private fun generatePropertyStub(
-        sb: StringBuilder,
-        prop: ProtoBuf.Property,
-        nameResolver: ProtoBuf.StringTable,
-        indent: String
-    ) {
-        val name = resolveString(prop.name, nameResolver) ?: return
-        val visibility = getVisibility(Flags.VISIBILITY.get(prop.flags))
-        if (visibility == "private" || visibility == "internal") return
+    private fun generateProperty(sb: StringBuilder, prop: ProtoBuf.Property, ctx: Ctx, indent: String) {
+        val name = str(prop.name, ctx) ?: return
+        val vis = visibility(Flags.VISIBILITY.get(prop.flags))
+        if (vis == "private " || vis == "internal ") return
 
-        val isVar = Flags.IS_VAR.get(prop.flags)
-        val keyword = if (isVar) "var" else "val"
+        val kw = if (Flags.IS_VAR.get(prop.flags)) "var" else "val"
+        val recv = if (prop.hasReceiverType()) "${renderType(prop.receiverType, ctx) ?: "Any"}." else ""
+        val type = if (prop.hasReturnType()) renderType(prop.returnType, ctx) ?: "Any?" else "Any?"
 
-        // Extension receiver
-        val receiverStr = if (prop.hasReceiverType()) {
-            val recType = renderTypeSimple(prop.receiverType, nameResolver)
-            "$recType."
-        } else ""
-
-        val type = if (prop.hasReturnType()) renderTypeSimple(prop.returnType, nameResolver) else "Any?"
-
-        sb.appendLine("${indent}${visibility}$keyword ${receiverStr}$name: $type get() = TODO()")
+        sb.appendLine("${indent}${vis}$kw ${recv}$name: $type get() = TODO()")
     }
 
-    // ---- Helpers ----
+    // ---- Name resolution ----
 
-    private fun resolveString(index: Int, strings: ProtoBuf.StringTable): String? {
-        return if (index >= 0 && index < strings.stringCount) strings.getString(index)
-        else null
+    private fun str(index: Int, ctx: Ctx): String? {
+        return if (index in 0 until ctx.strings.stringCount) ctx.strings.getString(index) else null
     }
 
-    private fun resolveClassName(
-        fqNameIndex: Int,
-        qualifiedNameTable: ProtoBuf.QualifiedNameTable,
-        strings: ProtoBuf.StringTable
-    ): String? {
-        if (fqNameIndex < 0 || fqNameIndex >= qualifiedNameTable.qualifiedNameCount) return null
-        val qn = qualifiedNameTable.getQualifiedName(fqNameIndex)
+    private fun resolveQName(index: Int, ctx: Ctx): String? {
+        if (index < 0 || index >= ctx.qNames.qualifiedNameCount) return null
         val parts = mutableListOf<String>()
-        var current = qn
+        var qn = ctx.qNames.getQualifiedName(index)
         while (true) {
-            val name = resolveString(current.shortName, strings) ?: return null
+            val name = str(qn.shortName, ctx) ?: return null
             parts.add(0, name)
-            if (!current.hasParentQualifiedName()) break
-            val parentIdx = current.parentQualifiedName
-            if (parentIdx < 0 || parentIdx >= qualifiedNameTable.qualifiedNameCount) break
-            current = qualifiedNameTable.getQualifiedName(parentIdx)
+            if (!qn.hasParentQualifiedName()) break
+            val parentIdx = qn.parentQualifiedName
+            if (parentIdx < 0 || parentIdx >= ctx.qNames.qualifiedNameCount) break
+            qn = ctx.qNames.getQualifiedName(parentIdx)
         }
         return parts.joinToString(".")
     }
 
-    private fun renderTypeSimple(type: ProtoBuf.Type, strings: ProtoBuf.StringTable): String {
-        val name = if (type.hasClassName()) {
-            resolveString(type.className, strings) ?: "Any"
-        } else if (type.hasTypeParameter()) {
-            "T${type.typeParameter}"
-        } else {
-            "Any"
+    // ---- Type rendering (uses QualifiedNameTable for className) ----
+
+    private fun renderType(type: ProtoBuf.Type, ctx: Ctx): String? {
+        val base = when {
+            type.hasClassName() -> resolveQName(type.className, ctx) ?: return null
+            type.hasTypeParameter() -> {
+                // Type parameter — try to resolve from type parameter index
+                // Just use a generic name since we don't have the full context
+                "Any"
+            }
+            type.hasTypeAliasName() -> resolveQName(type.typeAliasName, ctx) ?: return null
+            else -> return null
         }
-        val nullable = if (type.nullable) "?" else ""
-        val typeArgs = if (type.argumentCount > 0) {
+        val args = if (type.argumentCount > 0) {
             "<${type.argumentList.joinToString(", ") { arg ->
-                if (arg.hasType()) renderTypeSimple(arg.type, strings)
-                else "*"
+                if (arg.hasType()) renderType(arg.type, ctx) ?: "*" else "*"
             }}>"
         } else ""
-        return "$name$typeArgs$nullable"
+        val nullable = if (type.nullable) "?" else ""
+        return "$base$args$nullable"
     }
 
-    private fun renderType(
-        type: ProtoBuf.Type,
-        strings: ProtoBuf.StringTable,
-        qualifiedNameTable: ProtoBuf.QualifiedNameTable
-    ): String? {
-        return if (type.hasClassName()) {
-            val name = resolveClassName(type.className, qualifiedNameTable, strings) ?: return null
-            val nullable = if (type.nullable) "?" else ""
-            "$name$nullable"
-        } else {
-            renderTypeSimple(type, strings)
-        }
+    private fun typeParams(list: List<ProtoBuf.TypeParameter>, ctx: Ctx): String {
+        if (list.isEmpty()) return ""
+        val rendered = list.mapNotNull { str(it.name, ctx) }
+        return if (rendered.isNotEmpty()) "<${rendered.joinToString(", ")}> " else ""
     }
 
-    private fun renderTypeParameters(
-        typeParams: List<ProtoBuf.TypeParameter>,
-        strings: ProtoBuf.StringTable
-    ): String {
-        if (typeParams.isEmpty()) return ""
-        val rendered = typeParams.mapNotNull { tp ->
-            resolveString(tp.name, strings)
-        }
-        return if (rendered.isNotEmpty()) "<${rendered.joinToString(", ")}>" else ""
-    }
-
-    private fun getVisibility(visibility: ProtoBuf.Visibility?): String = when (visibility) {
+    private fun visibility(v: ProtoBuf.Visibility?): String = when (v) {
         ProtoBuf.Visibility.PRIVATE, ProtoBuf.Visibility.PRIVATE_TO_THIS -> "private "
         ProtoBuf.Visibility.INTERNAL -> "internal "
         ProtoBuf.Visibility.PROTECTED -> "protected "
-        else -> ""  // public is default, omit
+        else -> ""
     }
 
-    private fun getModality(modality: ProtoBuf.Modality?): String = when (modality) {
+    private fun modality(m: ProtoBuf.Modality?): String = when (m) {
         ProtoBuf.Modality.ABSTRACT -> "abstract "
         ProtoBuf.Modality.OPEN -> "open "
         ProtoBuf.Modality.SEALED -> "sealed "
