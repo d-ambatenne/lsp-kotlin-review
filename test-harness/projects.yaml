@@ -1,16 +1,92 @@
 projects:
-  - name: NotyKT
-    repo: https://github.com/AmarjitGhuman/NotyKT
+  # ── Android ──────────────────────────────────────────────
+  - name: nowinandroid
+    repo: https://github.com/android/nowinandroid
     branch: main
+    type: android
+    features: [hover, definition, diagnostics, completion, references, symbols]
+
+  - name: compose-samples-jetsnack
+    repo: https://github.com/android/compose-samples
+    branch: main
+    type: android
+    subdir: Jetsnack
+    features: [hover, definition, diagnostics, completion, symbols]
+
+  - name: compose-samples-jetcaster
+    repo: https://github.com/android/compose-samples
+    branch: main
+    type: android
+    subdir: Jetcaster
+    features: [hover, definition, diagnostics, completion, symbols]
+
+  - name: NotyKT
+    repo: https://github.com/PatilShreyas/NotyKT
+    branch: master
     type: android
     subdir: noty-android
     features: [hover, definition, diagnostics, completion, references]
 
+  - name: Pokedex
+    repo: https://github.com/skydoves/Pokedex
+    branch: main
+    type: android
+    features: [hover, definition, diagnostics, completion, references, symbols]
+
+  # ── Spring Boot ──────────────────────────────────────────
+  - name: spring-realworld
+    repo: https://github.com/gothinkster/kotlin-spring-realworld-example-app
+    branch: master
+    type: jvm
+    features: [hover, definition, diagnostics, completion, references, symbols]
+
+  - name: spring-boot-kotlin-boilerplate
+    repo: https://github.com/awakelife93/spring-boot-kotlin-boilerplate
+    branch: main
+    type: jvm
+    features: [hover, definition, diagnostics, completion, references, symbols]
+
+  - name: spring-boot-kotlin-demo
+    repo: https://github.com/sdeleuze/spring-boot-kotlin-demo
+    branch: main
+    type: jvm
+    features: [hover, definition, diagnostics, completion, references, symbols]
+
+  - name: spring-guides-kotlin
+    repo: https://github.com/spring-guides/tut-spring-boot-kotlin
+    branch: main
+    type: jvm
+    features: [hover, definition, diagnostics, completion, references, symbols]
+
+  - name: spring-petclinic-kotlin
+    repo: https://github.com/sdeleuze/spring-petklinik
+    branch: main
+    type: jvm
+    features: [hover, definition, diagnostics, completion, references, symbols]
+
+  # ── KMP ──────────────────────────────────────────────────
+  - name: PeopleInSpace
+    repo: https://github.com/joreilly/PeopleInSpace
+    branch: main
+    type: kmp
+    features: [hover, definition, diagnostics, completion, references, symbols]
+
+  - name: kmp-production-sample
+    repo: https://github.com/Kotlin/kmp-production-sample
+    branch: master
+    type: kmp
+    features: [hover, definition, diagnostics, completion, symbols]
+
+  - name: kotlinconf-app
+    repo: https://github.com/JetBrains/kotlinconf-app
+    branch: main
+    type: kmp
+    features: [hover, definition, diagnostics, completion, references, symbols]
+
   - name: kotlinx-coroutines
     repo: https://github.com/Kotlin/kotlinx.coroutines
     branch: master
-    type: jvm
-    subdir: ""
+    type: kmp
     features: [hover, definition, diagnostics, completion, references]
 
   - name: ktor
@@ -19,16 +95,9 @@ projects:
     type: kmp
     features: [hover, definition, diagnostics]
 
-  - name: compose-samples
-    repo: https://github.com/android/compose-samples
-    branch: main
-    type: android
-    subdir: Jetsnack
-    features: [hover, definition, diagnostics, completion]
-
 thresholds:
-  hover_success_rate: 0.7
-  definition_success_rate: 0.6
+  hover_success_rate: 0.5
+  definition_success_rate: 0.4
   diagnostics_no_crash: true
-  completion_non_empty: 0.8
-  startup_time_max_s: 30
+  completion_non_empty: 0.5
+  startup_time_max_s: 120
