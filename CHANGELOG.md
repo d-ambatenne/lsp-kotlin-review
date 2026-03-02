@@ -4,6 +4,24 @@ All notable changes to the Kotlin Review LSP extension will be documented in thi
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.6.0] - 2026-03-02
+
+### Fixed
+
+- **Fresh clone resolution for Android/KMP projects**: `cp.incoming.artifactView { lenient = true }` silently returned empty on fresh clones because dependencies hadn't been downloaded. Added `cp.resolve()` before each lenient view to force Gradle to contact Maven repos. This takes multi-module Android and KMP projects from 0% to 88–100% hover/definition on first open.
+- **AAR extraction cache NPE**: `ConcurrentHashMap.getOrPut()` threw NPE when `extractClassesFromAar()` returned null for AARs without `classes.jar`. This crashed the facade constructor, silently falling back to `StubCompilerFacade` (0% on all features). Fixed with `Optional` wrapper.
+
+### Improved
+
+- **Hover shows containing class**: member symbols now display `// in ClassName` above the signature
+- **Completion trigger context**: dot completions send `triggerKind` and `triggerCharacter` to the server
+- **Conventional source roots always added**: ensures coverage for all module types, not just Android or empty-source modules
+- **KMP conventional directories**: `addConventionalSourceRoots()` now includes `commonMain`, `jvmMain`, `iosMain`, `jsMain`, `nativeMain`, `wasmJsMain` and their test counterparts
+- **Init script timeout**: increased from 300s to 600s to accommodate fresh clone dependency downloads
+- **Test harness readiness timeout**: increased from 120s to 300s
+- **`ExitOnOutOfMemoryError` JVM flag**: added to test harness default JVM args
+- **Stack trace on facade fallback**: `AnalysisSession.createFacade()` now logs the full stack trace when falling back to stub
+
 ## [1.5.0] - 2026-02-28
 
 ### Added
