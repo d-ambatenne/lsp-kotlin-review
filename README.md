@@ -8,14 +8,14 @@ Unlike full-featured Kotlin IDEs, this extension provides just the language inte
 
 ### From VSIX (recommended)
 
-1. Download the `.vsix` file from the [latest release](https://github.com/<org>/lsp-kotlin-review/releases)
+1. Download the `.vsix` file from the [latest release](https://github.com/d-ambatenne/lsp-kotlin-review/releases)
 2. In VS Code, open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`)
 3. Run **Extensions: Install from VSIX...** and select the downloaded file
 
 ### From source
 
 ```bash
-git clone https://github.com/<org>/lsp-kotlin-review.git
+git clone https://github.com/d-ambatenne/lsp-kotlin-review.git
 cd lsp-kotlin-review
 ./scripts/package.sh
 ```
@@ -32,7 +32,7 @@ Then install the generated `.vsix` from `client/`.
 
 ### Kotlin versions
 
-The server uses the Kotlin Analysis API 2.1.0 (K2/FIR). It supports analyzing projects that target **Kotlin 2.0+**. Kotlin 1.x projects may work for basic features (diagnostics, navigation) but are not officially supported.
+The server uses the Kotlin Analysis API 2.3.0 (K2/FIR). It supports analyzing projects that target **Kotlin 2.0+**. Kotlin 1.x projects may work for basic features (diagnostics, navigation) but are not officially supported.
 
 ### Gradle versions
 
@@ -40,7 +40,7 @@ The Gradle Tooling API 8.12 is used for classpath resolution. Compatible with **
 
 ### Android projects
 
-**Supported.** The extension auto-detects Android modules, adds `android.jar` from `ANDROID_HOME`, resolves library dependencies via Gradle init script, and scans `build/generated/` for R class, BuildConfig, KSP, and KAPT generated sources.
+**Supported.** The extension auto-detects Android modules, adds `android.jar` from `ANDROID_HOME`, resolves library dependencies via Gradle init script (including on fresh clones), and scans `build/generated/` for R class, BuildConfig, KSP, and KAPT generated sources.
 
 **First-time setup:** For generated code (R class, BuildConfig, annotation processor outputs), run once:
 ```bash
@@ -50,13 +50,20 @@ The extension shows a notification and offers a code action (lightbulb) to run t
 
 **Known limitations:**
 - KSP/KAPT-generated classes (e.g. Hilt components, Room DAOs) require a full build (`./gradlew assembleDebug`)
-- Some Android projects with complex dependency graphs may have partial library resolution — running `./gradlew assembleDebug` once resolves this
-- No flavor/variant selection — defaults to `debug` variant
 - Compose compiler plugin outputs are not available without a build
+
+**Tested on:** nowinandroid (99% hover), Jetcaster (100%), NotyKT (100%), Pokedex (98%) -- all on fresh clones without prior builds.
 
 ### Kotlin Multiplatform (KMP)
 
-**Not currently supported.** KMP projects use expect/actual declarations and platform-specific source sets that require special handling in the Analysis API session configuration. The server currently configures JVM-only source modules. KMP support may be added in a future version.
+**Supported.** The extension detects KMP projects, creates per-platform Analysis API sessions (JVM, Android, Native, JS/WasmJS), resolves target-specific classpaths including klib dependencies, and supports expect/actual navigation.
+
+- **Per-target sessions** -- each platform gets its own analysis session with correct source roots and classpath
+- **Expect/actual navigation** -- go-to-implementation on `expect` declarations finds `actual` counterparts
+- **Platform indicator** -- status bar shows the current file's target platform (e.g. `Kotlin: jvmMain`)
+- **Klib support** -- native klib dependencies are converted to Kotlin stubs for analysis
+
+**Tested on:** PeopleInSpace (100% hover), kotlinconf-app (100%), kmp-production-sample (100%) -- all on fresh clones.
 
 ## Features
 
@@ -70,16 +77,16 @@ The extension shows a notification and offers a code action (lightbulb) to run t
 - **Diagnostics** -- syntax and semantic errors/warnings, updated on save
 - **Go to Definition** -- jump to where a symbol is declared
 - **Find References** -- find all usages of a symbol across the project
-- **Hover** -- type information, signatures (including library types), and KDoc on mouse-over
+- **Hover** -- type information, signatures with containing class context, inferred types for declarations without explicit annotations
 - **Document Symbols** -- outline view of classes, functions, and properties
 
 ### Enhanced
 
-- **Go to Implementation** -- find concrete implementations of interfaces/abstract classes
+- **Go to Implementation** -- find concrete implementations of interfaces/abstract classes; on KMP `expect` declarations, navigates to `actual` counterparts
 - **Go to Type Definition** -- jump to the type of a variable or expression
 - **Rename Symbol** -- project-wide safe rename
-- **Code Actions / Quick Fixes** -- auto-fix common diagnostics
-- **Basic Completion** -- context-aware code completion for project symbols and dependencies
+- **Code Actions / Quick Fixes** -- auto-fix common diagnostics (unused variables, redundant nullable)
+- **Completion** -- context-aware code completion for project symbols, library/stdlib dependencies, dot/member completion, and 50+ Kotlin keywords with smart insert text
 
 ## Architecture
 
@@ -89,17 +96,21 @@ VS Code Extension (TypeScript)
         v
 Language Server (Kotlin/JVM)
   +-- LSP4J protocol layer
-  +-- Feature Providers
-  +-- CompilerFacade (our stable abstraction)
+  +-- Feature Providers (hover, definition, completion, ...)
+  +-- CompilerFacade (stable abstraction)
   |     +-- AnalysisApiCompilerFacade (K2/FIR backend)
+  |           +-- Per-platform sessions (JVM, Android, Native, JS)
   +-- Build System Resolver
-        +-- Gradle (v1)
-        +-- Manual fallback
+  |     +-- Gradle (Tooling API + init script for Android/KMP)
+  |     +-- Manual fallback
+  +-- Klib Stub Generator (native deps → Kotlin stubs)
+  +-- AAR Extractor (Android deps → classes.jar)
 ```
 
-- **Compiler backend**: Kotlin Analysis API with K2/FIR in standalone mode -- no IntelliJ dependency
-- **Build system**: Pluggable SPI. Ships with Gradle Tooling API provider; Maven, Bazel, and others planned
-- **Performance**: Analysis-phase only (no codegen), single-threaded analysis, session rebuild on save
+- **Compiler backend**: Kotlin Analysis API 2.3.0 with K2/FIR in standalone mode -- no IntelliJ dependency
+- **Build system**: Pluggable SPI. Ships with Gradle Tooling API provider (including init script for AGP/KMP classpath resolution)
+- **KMP**: Per-platform Analysis API sessions with target-specific source roots and classpaths
+- **Performance**: Analysis-phase only (no codegen), single-threaded analysis, session rebuild on save, klib stub and AAR extraction caches persist across rebuilds
 
 See [docs/design.md](docs/design.md) for the full architecture, [docs/decisions.md](docs/decisions.md) for ADRs, and [docs/scope.md](docs/scope.md) for the feature roadmap.
 
@@ -109,6 +120,8 @@ See [docs/design.md](docs/design.md) for the full architecture, [docs/decisions.
 |---------|-------------|---------|
 | `kotlinReview.java.home` | Path to Java 17+ runtime | `JAVA_HOME` or `PATH` |
 | `kotlinReview.server.jvmArgs` | Additional JVM arguments for the language server | (empty) |
+| `kotlinReview.android.buildVariant` | Android build variant for classpath resolution | `debug` |
+| `kotlinReview.android.autoGenerate` | Auto-run Gradle code generation on save | `false` |
 | `kotlinReview.trace.server` | Trace LSP communication (`off`, `messages`, `verbose`) | `off` |
 
 ## Project Structure
@@ -118,6 +131,7 @@ lsp-kotlin-review/
 +-- client/          # VS Code extension (TypeScript, vscode-languageclient)
 |   +-- syntaxes/    # TextMate grammar for syntax highlighting
 +-- server/          # Language server (Kotlin, LSP4J, Analysis API)
++-- test-harness/    # E2E test harness (TypeScript, 15 test projects)
 +-- docs/            # Architecture, decisions, scope
 +-- scripts/         # Build and packaging
 +-- .github/         # CI workflows
