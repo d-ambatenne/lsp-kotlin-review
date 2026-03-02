@@ -68,7 +68,8 @@ class AnalysisApiCompilerFacade(
 
     // Caches for expensive operations — persist across session rebuilds (must be before init)
     private val klibStubCache = ConcurrentHashMap<String, List<Path>>()
-    private val aarExtractionCache = ConcurrentHashMap<Path, Path?>()
+    // ConcurrentHashMap doesn't allow null values — use Optional to wrap nullable Path
+    private val aarExtractionCache = ConcurrentHashMap<Path, java.util.Optional<Path>>()
 
     init {
         sessions = buildSessions()
@@ -127,7 +128,10 @@ class AnalysisApiCompilerFacade(
         // Extract classes.jar from AAR files (cached)
         val allClasspath = nonKlibEntries.flatMap { entry ->
             if (entry.toString().endsWith(".aar")) {
-                val extracted = aarExtractionCache.getOrPut(entry) { extractClassesFromAar(entry) }
+                val cached = aarExtractionCache.getOrPut(entry) {
+                    java.util.Optional.ofNullable(extractClassesFromAar(entry))
+                }
+                val extracted = cached.orElse(null)
                 if (extracted != null) listOf(extracted) else emptyList()
             } else {
                 listOf(entry)
@@ -335,15 +339,36 @@ class AnalysisApiCompilerFacade(
                 append(renderType(symbol.returnType))
             }
             is KaClassSymbol -> buildString {
-                append(when (symbol.classKind) {
+                val keyword = when (symbol.classKind) {
                     KaClassKind.INTERFACE -> "interface "
                     KaClassKind.ENUM_CLASS -> "enum class "
                     KaClassKind.OBJECT -> "object "
                     KaClassKind.COMPANION_OBJECT -> "companion object "
                     KaClassKind.ANNOTATION_CLASS -> "annotation class "
                     else -> "class "
-                })
-                append(symbol.classId?.asFqNameString() ?: symbolName(symbol) ?: "?")
+                }
+                // Check if this is a data class by inspecting PSI
+                val psi = try { symbol.psi as? KtClass } catch (_: Exception) { null }
+                if (psi != null && psi.isData()) {
+                    append("data class ")
+                } else {
+                    append(keyword)
+                }
+                append(symbol.classId?.shortClassName?.asString() ?: symbolName(symbol) ?: "?")
+                // For data classes, render primary constructor parameters
+                if (psi != null && psi.isData()) {
+                    val params = psi.primaryConstructorParameters
+                    if (params.isNotEmpty()) {
+                        append("(")
+                        append(params.joinToString(", ") { p ->
+                            val prefix = if (p.valOrVarKeyword?.text == "var") "var " else "val "
+                            val name = p.name ?: "_"
+                            val type = p.typeReference?.text ?: "Any"
+                            "$prefix$name: $type"
+                        })
+                        append(")")
+                    }
+                }
             }
             is KaPropertySymbol -> buildString {
                 append(if (symbol.isVal) "val " else "var ")
@@ -391,13 +416,39 @@ class AnalysisApiCompilerFacade(
      */
     private fun extractSignatureLine(psiText: String): String? {
         val lines = psiText.lines()
-        // Find the first line that looks like a declaration keyword, not annotation content
         val declIndex = lines.indexOfFirst { declarationKeywordPattern.containsMatchIn(it) }
-        if (declIndex >= 0) return lines[declIndex].trim().take(120)
-        // Fallback: first non-empty, non-annotation line
-        return (lines.firstOrNull { it.trim().let { t -> t.isNotEmpty() && !t.startsWith("@") } }
-            ?: lines.firstOrNull())
-            ?.trim()?.take(120)
+        if (declIndex < 0) {
+            // Fallback: first non-empty, non-annotation line
+            return (lines.firstOrNull { it.trim().let { t -> t.isNotEmpty() && !t.startsWith("@") } }
+                ?: lines.firstOrNull())
+                ?.trim()?.take(200)
+        }
+
+        val declLine = lines[declIndex].trim()
+
+        // Single-line declaration (balanced parens or no parens)
+        val openCount = declLine.count { it == '(' }
+        val closeCount = declLine.count { it == ')' }
+        if (openCount == 0 || openCount <= closeCount) {
+            return if (declLine.length > 200) declLine.take(200) + "..." else declLine
+        }
+
+        // Multi-line declaration: collect lines until parens balance
+        val sb = StringBuilder(declLine)
+        var depth = openCount - closeCount
+        for (i in (declIndex + 1) until lines.size) {
+            val nextLine = lines[i].trim()
+            if (nextLine.isEmpty()) continue
+            // Stop at body start
+            if (nextLine.startsWith("{") || nextLine.startsWith("=")) break
+            sb.append(" ").append(nextLine)
+            depth += nextLine.count { it == '(' } - nextLine.count { it == ')' }
+            if (depth <= 0) break
+            if (sb.length > 500) break
+        }
+
+        val result = sb.toString()
+        return if (result.length > 500) result.take(500) + "..." else result
     }
 
     /** Render a KaType to a clean Kotlin-syntax string with short names. */
@@ -1007,7 +1058,7 @@ class AnalysisApiCompilerFacade(
             val name = symbolName(symbol) ?: continue
             if (name.startsWith("<")) continue
             if (!seen.add(name)) continue
-            candidates.add(kaSymbolToCandidate(symbol, name, 0))
+            candidates.add(kaSymbolToCandidate(symbol, name, -1))
         }
     }
 

@@ -21,7 +21,10 @@ class HoverProvider(private val facade: CompilerFacade) {
             val parts = mutableListOf<String>()
 
             // Signature from resolved symbol
-            symbol?.signature?.let { parts.add("```kotlin\n$it\n```") }
+            symbol?.signature?.let { sig ->
+                val classPrefix = symbol.containingClass?.let { "// in $it\n" } ?: ""
+                parts.add("```kotlin\n$classPrefix$sig\n```")
+            }
 
             // Type info (if no signature available)
             if (symbol?.signature == null && typeInfo != null) {

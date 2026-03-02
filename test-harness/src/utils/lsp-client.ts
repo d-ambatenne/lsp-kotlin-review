@@ -211,15 +211,19 @@ export class LspClient {
     }
   }
 
-  async completion(uri: string, line: number, character: number): Promise<CompletionItem[]> {
+  async completion(uri: string, line: number, character: number, context?: { triggerKind: number; triggerCharacter?: string }): Promise<CompletionItem[]> {
     if (!this.connection) throw new Error('Not connected');
 
     try {
+      const params: any = {
+        textDocument: { uri },
+        position: { line, character },
+      };
+      if (context) {
+        params.context = context;
+      }
       const result = await withTimeout(
-        this.connection.sendRequest('textDocument/completion', {
-          textDocument: { uri },
-          position: { line, character },
-        }),
+        this.connection.sendRequest('textDocument/completion', params),
         this.options.requestTimeoutMs ?? 10000,
         'Completion request timed out',
       ) as any;

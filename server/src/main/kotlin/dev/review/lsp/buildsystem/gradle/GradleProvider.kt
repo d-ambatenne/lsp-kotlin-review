@@ -30,10 +30,24 @@ class GradleProvider : BuildSystemProvider {
             // Use model() builder to redirect stdout/stderr away from the LSP
             // protocol channel (process stdout). Without this, Gradle progress
             // output (e.g. downloading distributions) corrupts LSP headers.
-            val ideaProject = connection.model(IdeaProject::class.java)
-                .setStandardOutput(OutputStream.nullOutputStream())
-                .setStandardError(OutputStream.nullOutputStream())
-                .get()
+            val ideaProject = try {
+                val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+                val future = executor.submit<IdeaProject> {
+                    connection.model(IdeaProject::class.java)
+                        .setStandardOutput(OutputStream.nullOutputStream())
+                        .setStandardError(OutputStream.nullOutputStream())
+                        .get()
+                }
+                try {
+                    future.get(300, java.util.concurrent.TimeUnit.SECONDS)
+                } finally {
+                    executor.shutdownNow()
+                }
+            } catch (e: java.util.concurrent.TimeoutException) {
+                throw IllegalStateException(
+                    "Gradle model fetch timed out after 300s. " +
+                    "Try running './gradlew help' in the project first to warm up the cache.", e)
+            }
             var modules = ideaProject.modules.mapNotNull { ideaModule ->
                 try {
                     resolveModule(ideaModule, variant)
@@ -128,6 +142,13 @@ class GradleProvider : BuildSystemProvider {
                 System.err.println("[gradle] Skipping init script (no Android modules and no empty classpath)")
             }
 
+            // Warn about modules with sources but no classpath
+            for (m in modules) {
+                if (m.sourceRoots.isNotEmpty() && m.classpath.isEmpty()) {
+                    System.err.println("[gradle] WARNING: module '${m.name}' has ${m.sourceRoots.size} source roots but empty classpath — resolution will be incomplete")
+                }
+            }
+
             val isKmp = modules.any { it.targets.isNotEmpty() }
             if (isKmp) {
                 for (m in modules.filter { it.targets.isNotEmpty() }) {
@@ -187,12 +208,9 @@ class GradleProvider : BuildSystemProvider {
             System.err.println("[gradle] module '${ideaModule.name}': KMP detected, targets=${kmpTargets.map { "${it.name}(${it.platform})" }}")
         }
 
-        // Android modules often don't report source dirs through IdeaModule.
-        // Fall back to conventional Android source directory layout.
-        if (moduleDir != null && sourceRoots.isEmpty()) {
-            addConventionalSourceRoots(moduleDir, sourceRoots, testSourceRoots)
-        } else if (moduleDir != null && isAndroid) {
-            // Even if some source roots were reported, ensure conventional dirs are included
+        // Always add conventional source roots — ensures coverage for Android,
+        // KMP, and any modules where IdeaModule reports incomplete source dirs.
+        if (moduleDir != null) {
             addConventionalSourceRoots(moduleDir, sourceRoots, testSourceRoots)
         }
 
@@ -285,6 +303,15 @@ class GradleProvider : BuildSystemProvider {
                                     continue
                                 }
                                 try {
+                                    // Force dependency resolution — triggers downloads on fresh clones.
+                                    // resolve() may throw if some deps are unavailable, but downloaded
+                                    // deps remain in Gradle cache for the lenient view below.
+                                    try {
+                                        def resolved = cp.resolve()
+                                        println "LSPDBG:" + project.name + ":" + configName + "=resolved(" + resolved.size() + ")"
+                                    } catch (e) {
+                                        println "LSPDBG:" + project.name + ":" + configName + "=partial-resolve(" + e.message?.take(100) + ")"
+                                    }
                                     // Use artifactView with lenient=true — this is the proper
                                     // Gradle API that skips unresolvable artifacts gracefully
                                     cp.incoming.artifactView { lenient = true }.files.each { file ->
@@ -303,6 +330,12 @@ class GradleProvider : BuildSystemProvider {
                                 if (cp == null) continue
                                 if (!cp.canBeResolved) continue
                                 try {
+                                    try {
+                                        def resolved = cp.resolve()
+                                        println "LSPDBG:" + project.name + ":" + configName + "=resolved(" + resolved.size() + ")"
+                                    } catch (e) {
+                                        println "LSPDBG:" + project.name + ":" + configName + "=partial-resolve(" + e.message?.take(100) + ")"
+                                    }
                                     cp.incoming.artifactView { lenient = true }.files.each { file ->
                                         println "LSPTCP:" + project.name + ":" + file.absolutePath
                                     }
@@ -325,6 +358,12 @@ class GradleProvider : BuildSystemProvider {
                                 def cp = project.configurations.findByName(configName)
                                 if (cp == null || !cp.canBeResolved) continue
                                 try {
+                                    try {
+                                        def resolved = cp.resolve()
+                                        println "LSPDBG:" + project.name + ":" + configName + "=resolved(" + resolved.size() + ")"
+                                    } catch (e) {
+                                        println "LSPDBG:" + project.name + ":" + configName + "=partial-resolve(" + e.message?.take(100) + ")"
+                                    }
                                     cp.incoming.artifactView { lenient = true }.files.each { file ->
                                         println "LSPKMP:" + project.name + ":" + configName + ":" + file.absolutePath
                                     }
@@ -338,12 +377,25 @@ class GradleProvider : BuildSystemProvider {
             """.trimIndent())
 
             val outputStream = java.io.ByteArrayOutputStream()
-            connection.newBuild()
-                .forTasks("lspResolveClasspath")
-                .withArguments("--init-script", initScript.toString(), "-q", "--no-configuration-cache")
-                .setStandardOutput(outputStream)
-                .setStandardError(OutputStream.nullOutputStream())
-                .run()
+            val cancellationSource = GradleConnector.newCancellationTokenSource()
+            val cancelTimer = java.util.Timer(true)
+            cancelTimer.schedule(object : java.util.TimerTask() {
+                override fun run() {
+                    System.err.println("[gradle] Init script timed out after 600s, cancelling...")
+                    cancellationSource.cancel()
+                }
+            }, 600_000L)
+            try {
+                connection.newBuild()
+                    .forTasks("lspResolveClasspath")
+                    .withArguments("--init-script", initScript.toString(), "-q", "--no-configuration-cache")
+                    .setStandardOutput(outputStream)
+                    .setStandardError(OutputStream.nullOutputStream())
+                    .withCancellationToken(cancellationSource.token())
+                    .run()
+            } finally {
+                cancelTimer.cancel()
+            }
 
             val mainResult = mutableMapOf<String, MutableList<Path>>()
             val testResult = mutableMapOf<String, MutableList<Path>>()
@@ -599,7 +651,15 @@ class GradleProvider : BuildSystemProvider {
             "src/main/kotlin",
             "src/main/java",
             "src/debug/kotlin",
-            "src/debug/java"
+            "src/debug/java",
+            // KMP conventional directories
+            "src/commonMain/kotlin",
+            "src/jvmMain/kotlin",
+            "src/androidMain/kotlin",
+            "src/iosMain/kotlin",
+            "src/jsMain/kotlin",
+            "src/nativeMain/kotlin",
+            "src/wasmJsMain/kotlin"
         )
         for (dir in mainDirs) {
             val path = moduleDir.resolve(dir)
@@ -613,7 +673,14 @@ class GradleProvider : BuildSystemProvider {
             "src/test/kotlin",
             "src/test/java",
             "src/androidTest/kotlin",
-            "src/androidTest/java"
+            "src/androidTest/java",
+            // KMP test directories
+            "src/commonTest/kotlin",
+            "src/jvmTest/kotlin",
+            "src/iosTest/kotlin",
+            "src/jsTest/kotlin",
+            "src/nativeTest/kotlin",
+            "src/wasmJsTest/kotlin"
         )
         for (dir in testDirs) {
             val path = moduleDir.resolve(dir)

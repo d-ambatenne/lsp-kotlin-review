@@ -37,7 +37,10 @@ export class CompletionValidator {
       for (const pos of positions) {
         positionsTested++;
         try {
-          const items = await client.completion(uri, pos.line, pos.character);
+          const context = pos.kind === 'dot_completion'
+            ? { triggerKind: 2, triggerCharacter: '.' }
+            : undefined;
+          const items = await client.completion(uri, pos.line, pos.character, context);
           if (items.length > 0) {
             nonEmpty++;
           } else {

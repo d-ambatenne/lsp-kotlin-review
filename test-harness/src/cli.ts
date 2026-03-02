@@ -44,7 +44,7 @@ program
   .option('-f, --feature <name>', 'Run a specific feature only')
   .option('-j, --jar <path>', 'Path to server-all.jar', DEFAULT_SERVER_JAR)
   .option('--java <path>', 'Path to java binary')
-  .option('--jvm-args <args>', 'JVM arguments (comma-separated)', '-Xmx2g,-XX:+UseG1GC')
+  .option('--jvm-args <args>', 'JVM arguments (comma-separated)', '-Xmx2g,-XX:+UseG1GC,-XX:+ExitOnOutOfMemoryError')
   .option('--max-files <n>', 'Max .kt files per project', '50')
   .option('--timeout <ms>', 'Request timeout in ms', '10000')
   .option('--compare-baseline', 'Compare results against saved baseline')

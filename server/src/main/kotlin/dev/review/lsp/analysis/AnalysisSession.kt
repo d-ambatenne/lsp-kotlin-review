@@ -21,6 +21,8 @@ class AnalysisSession(
             AnalysisApiCompilerFacade(model)
         } catch (e: Exception) {
             System.err.println("Failed to create Analysis API facade, falling back to stub: ${e.message}")
+            e.printStackTrace(System.err)
+            System.err.flush()
             StubCompilerFacade()
         }
     }

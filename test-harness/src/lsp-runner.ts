@@ -57,7 +57,7 @@ export class LspRunner {
       workspaceRoot: workspacePath,
       javaPath: options.javaPath,
       jvmArgs: options.jvmArgs,
-      initTimeoutMs: options.initTimeoutMs ?? 30000,
+      initTimeoutMs: options.initTimeoutMs ?? 180000,
       requestTimeoutMs: options.requestTimeoutMs ?? 10000,
     };
 
@@ -67,7 +67,7 @@ export class LspRunner {
     try {
       console.log(`  Starting LSP server...`);
       await client.start();
-      await client.waitForReady(120000);
+      await client.waitForReady(300000);
       const startupTime = (Date.now() - startTime) / 1000;
       console.log(`  Server ready in ${startupTime.toFixed(1)}s`);
       if (client.messages.length > 0) {
