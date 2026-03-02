@@ -2,44 +2,44 @@
   "name": "NotyKT",
   "type": "android",
   "files_tested": 15,
-  "startup_time_s": 57.263,
+  "startup_time_s": 6.262,
   "server_crashed": false,
   "hover": {
-    "total": 599,
-    "resolved": 0,
-    "unresolved": 599,
+    "total": 611,
+    "resolved": 610,
+    "unresolved": 1,
     "errors": 0,
-    "success_rate": 0
+    "success_rate": 0.9983633387888707
   },
   "definition": {
-    "total": 413,
-    "resolved": 0,
-    "unresolved": 413,
+    "total": 408,
+    "resolved": 408,
+    "unresolved": 0,
     "errors": 0,
-    "success_rate": 0
+    "success_rate": 1
   },
   "diagnostics": {
     "files_opened": 15,
-    "files_with_diagnostics": 0,
-    "total_diagnostics": 0,
+    "files_with_diagnostics": 3,
+    "total_diagnostics": 15,
     "errors": 0,
-    "warnings": 0,
+    "warnings": 15,
     "info": 0,
     "hints": 0,
     "server_crashes": 0
   },
   "completion": {
-    "positions_tested": 256,
-    "non_empty": 256,
-    "empty": 0,
+    "positions_tested": 250,
+    "non_empty": 100,
+    "empty": 150,
     "errors": 0,
-    "success_rate": 1
+    "success_rate": 0.4
   },
   "references": {
-    "total": 288,
-    "resolved": 0,
-    "unresolved": 288,
+    "total": 287,
+    "resolved": 275,
+    "unresolved": 12,
     "errors": 0,
-    "success_rate": 0
+    "success_rate": 0.9581881533101045
   }
 }

@@ -2,7 +2,7 @@
   "name": "kotlinx-coroutines",
   "type": "kmp",
   "files_tested": 15,
-  "startup_time_s": 120.42,
+  "startup_time_s": 28.315,
   "server_crashed": false,
   "hover": {
     "total": 474,
@@ -30,10 +30,10 @@
   },
   "completion": {
     "positions_tested": 231,
-    "non_empty": 231,
-    "empty": 0,
+    "non_empty": 108,
+    "empty": 123,
     "errors": 0,
-    "success_rate": 1
+    "success_rate": 0.4675324675324675
   },
   "references": {
     "total": 235,

@@ -2,45 +2,45 @@
   "name": "kmp-production-sample",
   "type": "kmp",
   "files_tested": 15,
-  "startup_time_s": 4.217,
+  "startup_time_s": 5.224,
   "server_crashed": false,
   "hover": {
-    "total": 633,
-    "resolved": 0,
-    "unresolved": 633,
+    "total": 664,
+    "resolved": 664,
+    "unresolved": 0,
     "errors": 0,
-    "success_rate": 0
+    "success_rate": 1
   },
   "definition": {
-    "total": 409,
-    "resolved": 0,
-    "unresolved": 409,
+    "total": 422,
+    "resolved": 414,
+    "unresolved": 8,
     "errors": 0,
-    "success_rate": 0
+    "success_rate": 0.981042654028436
   },
   "diagnostics": {
     "files_opened": 15,
-    "files_with_diagnostics": 0,
-    "total_diagnostics": 0,
-    "errors": 0,
+    "files_with_diagnostics": 3,
+    "total_diagnostics": 17,
+    "errors": 17,
     "warnings": 0,
     "info": 0,
     "hints": 0,
     "server_crashes": 0
   },
   "completion": {
-    "positions_tested": 283,
-    "non_empty": 283,
-    "empty": 0,
+    "positions_tested": 277,
+    "non_empty": 133,
+    "empty": 144,
     "errors": 0,
-    "success_rate": 1
+    "success_rate": 0.48014440433212996
   },
   "symbols": {
     "files_tested": 15,
-    "total_symbols": 0,
-    "files_with_symbols": 0,
-    "files_empty": 15,
+    "total_symbols": 81,
+    "files_with_symbols": 15,
+    "files_empty": 0,
     "errors": 0,
-    "success_rate": 0
+    "success_rate": 1
   }
 }

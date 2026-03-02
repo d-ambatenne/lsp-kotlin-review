@@ -2,21 +2,21 @@
   "name": "kotlinconf-app",
   "type": "kmp",
   "files_tested": 15,
-  "startup_time_s": 120.428,
+  "startup_time_s": 11.227,
   "server_crashed": false,
   "hover": {
-    "total": 433,
-    "resolved": 0,
-    "unresolved": 433,
+    "total": 491,
+    "resolved": 491,
+    "unresolved": 0,
     "errors": 0,
-    "success_rate": 0
+    "success_rate": 1
   },
   "definition": {
-    "total": 354,
-    "resolved": 0,
-    "unresolved": 354,
+    "total": 382,
+    "resolved": 382,
+    "unresolved": 0,
     "errors": 0,
-    "success_rate": 0
+    "success_rate": 1
   },
   "diagnostics": {
     "files_opened": 15,
@@ -30,24 +30,24 @@
   },
   "completion": {
     "positions_tested": 243,
-    "non_empty": 243,
-    "empty": 0,
+    "non_empty": 101,
+    "empty": 142,
     "errors": 0,
-    "success_rate": 1
+    "success_rate": 0.4156378600823045
   },
   "references": {
-    "total": 269,
-    "resolved": 0,
-    "unresolved": 269,
+    "total": 283,
+    "resolved": 258,
+    "unresolved": 25,
     "errors": 0,
-    "success_rate": 0
+    "success_rate": 0.911660777385159
   },
   "symbols": {
     "files_tested": 15,
-    "total_symbols": 0,
-    "files_with_symbols": 0,
-    "files_empty": 15,
+    "total_symbols": 65,
+    "files_with_symbols": 15,
+    "files_empty": 0,
     "errors": 0,
-    "success_rate": 0
+    "success_rate": 1
   }
 }

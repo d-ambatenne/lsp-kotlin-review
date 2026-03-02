@@ -2,49 +2,49 @@
   "name": "spring-petclinic-kotlin",
   "type": "jvm",
   "files_tested": 15,
-  "startup_time_s": 30.237,
+  "startup_time_s": 6.236,
   "server_crashed": false,
   "hover": {
-    "total": 341,
-    "resolved": 228,
-    "unresolved": 113,
+    "total": 424,
+    "resolved": 292,
+    "unresolved": 132,
     "errors": 0,
-    "success_rate": 0.6686217008797654
+    "success_rate": 0.6886792452830188
   },
   "definition": {
-    "total": 299,
-    "resolved": 184,
-    "unresolved": 115,
+    "total": 325,
+    "resolved": 215,
+    "unresolved": 110,
     "errors": 0,
-    "success_rate": 0.6153846153846154
+    "success_rate": 0.6615384615384615
   },
   "diagnostics": {
     "files_opened": 15,
-    "files_with_diagnostics": 14,
-    "total_diagnostics": 178,
-    "errors": 174,
+    "files_with_diagnostics": 15,
+    "total_diagnostics": 213,
+    "errors": 209,
     "warnings": 4,
     "info": 0,
     "hints": 0,
     "server_crashes": 0
   },
   "completion": {
-    "positions_tested": 230,
-    "non_empty": 230,
-    "empty": 0,
+    "positions_tested": 236,
+    "non_empty": 92,
+    "empty": 144,
     "errors": 0,
-    "success_rate": 1
+    "success_rate": 0.3898305084745763
   },
   "references": {
-    "total": 245,
-    "resolved": 157,
-    "unresolved": 88,
+    "total": 260,
+    "resolved": 177,
+    "unresolved": 83,
     "errors": 0,
-    "success_rate": 0.6408163265306123
+    "success_rate": 0.6807692307692308
   },
   "symbols": {
     "files_tested": 15,
-    "total_symbols": 29,
+    "total_symbols": 32,
     "files_with_symbols": 15,
     "files_empty": 0,
     "errors": 0,
