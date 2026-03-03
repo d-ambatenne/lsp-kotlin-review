@@ -214,6 +214,25 @@ class GradleProvider : BuildSystemProvider {
             addConventionalSourceRoots(moduleDir, sourceRoots, testSourceRoots)
         }
 
+        // KMP modules: remove platform-specific source roots from module-level lists.
+        // They belong in KmpTarget.sourceRoots only — prevents leaking JS/Native
+        // sources into JVM sessions in mixed KMP/JVM projects.
+        if (isKmp) {
+            val platformSpecificPatterns = listOf(
+                "/jvmMain/", "/jvmTest/", "/androidMain/", "/androidTest/",
+                "/iosMain/", "/iosTest/", "/nativeMain/", "/nativeTest/",
+                "/jsMain/", "/jsTest/", "/wasmJsMain/", "/wasmJsTest/",
+                "/macosMain/", "/macosTest/", "/linuxMain/", "/linuxTest/",
+                "/mingwMain/", "/mingwTest/"
+            )
+            sourceRoots.removeAll { root ->
+                platformSpecificPatterns.any { root.toString().contains(it) }
+            }
+            testSourceRoots.removeAll { root ->
+                platformSpecificPatterns.any { root.toString().contains(it) }
+            }
+        }
+
         // KMP modules: add commonMain/commonTest to module-level source roots
         // so they're available to all target sessions
         if (isKmp && moduleDir != null) {
@@ -291,7 +310,12 @@ class GradleProvider : BuildSystemProvider {
                             println "LSPDBG:" + project.name + ":available=" + compileConfigs.join(",")
 
                             // --- Main classpath ---
+                            // Prioritize JVM-compatible configs (important for KMP modules
+                            // where jvmCompileClasspath gives JVM libs, not JS/Native)
                             def configs = ["$variantCp", "compileClasspath"]
+                            if (compileConfigs.contains("jvmCompileClasspath")) {
+                                configs.add(1, "jvmCompileClasspath")
+                            }
                             // Also try any available compile classpath config as last resort
                             compileConfigs.each { if (!configs.contains(it)) configs.add(it) }
 

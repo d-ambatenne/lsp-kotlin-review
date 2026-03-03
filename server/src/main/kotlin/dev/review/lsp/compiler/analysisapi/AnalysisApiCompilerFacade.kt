@@ -185,6 +185,33 @@ class AnalysisApiCompilerFacade(
         }
     }
 
+    /**
+     * Filter source roots to those relevant for the given platform.
+     * Platform-specific source sets (e.g. /wasmJsMain/) only go to their platform session.
+     * Common and standard source sets (e.g. /commonMain/, /src/main/) go to all platforms.
+     */
+    private fun sourceRootsForPlatform(roots: List<Path>, platform: KmpPlatform): List<Path> {
+        return roots.filter { root ->
+            val p = root.toString()
+            when {
+                p.contains("/wasmJsMain/") || p.contains("/wasmJsTest/") || p.contains("/jsMain/") || p.contains("/jsTest/") -> platform == KmpPlatform.JS
+                p.contains("/jvmMain/") || p.contains("/jvmTest/") -> platform == KmpPlatform.JVM
+                p.contains("/androidMain/") || p.contains("/androidTest/") -> platform == KmpPlatform.ANDROID
+                p.contains("/iosMain/") || p.contains("/iosTest/") || p.contains("/nativeMain/") || p.contains("/nativeTest/") ||
+                    p.contains("/macosMain/") || p.contains("/macosTest/") || p.contains("/linuxMain/") || p.contains("/linuxTest/") ||
+                    p.contains("/mingwMain/") || p.contains("/mingwTest/") -> platform == KmpPlatform.NATIVE
+                else -> true // common/standard roots go to all platforms
+            }
+        }
+    }
+
+    private fun platformTypeFor(platform: KmpPlatform) = when (platform) {
+        KmpPlatform.JVM -> JvmPlatforms.defaultJvmPlatform
+        KmpPlatform.ANDROID -> JvmPlatforms.defaultJvmPlatform
+        KmpPlatform.JS -> org.jetbrains.kotlin.platform.js.JsPlatforms.defaultJsPlatform
+        KmpPlatform.NATIVE -> org.jetbrains.kotlin.platform.konan.NativePlatforms.unspecifiedNativePlatform
+    }
+
     private fun buildSessions(): Map<KmpPlatform, org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession> {
         val kmpTargets = projectModel.modules.flatMap { it.targets }
         if (kmpTargets.isEmpty()) {
@@ -194,31 +221,51 @@ class AnalysisApiCompilerFacade(
             return mapOf(KmpPlatform.JVM to buildSingleSession(JvmPlatforms.defaultJvmPlatform, allSourceRoots, rawClasspath, true))
         }
 
-        // KMP: one session per platform
+        // Mixed or pure KMP: partition modules into KMP and non-KMP
+        val kmpModules = projectModel.modules.filter { it.targets.isNotEmpty() }
+        val nonKmpModules = projectModel.modules.filter { it.targets.isEmpty() }
         val byPlatform = kmpTargets.groupBy { it.platform }
 
-        return byPlatform.map { (platform, targets) ->
-            val platformType = when (platform) {
-                KmpPlatform.JVM -> JvmPlatforms.defaultJvmPlatform
-                KmpPlatform.ANDROID -> JvmPlatforms.defaultJvmPlatform
-                KmpPlatform.JS -> org.jetbrains.kotlin.platform.js.JsPlatforms.defaultJsPlatform
-                KmpPlatform.NATIVE -> org.jetbrains.kotlin.platform.konan.NativePlatforms.unspecifiedNativePlatform
+        val result = mutableMapOf<KmpPlatform, org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession>()
+
+        for ((platform, targets) in byPlatform) {
+            // KMP module source roots filtered for this platform (common + platform-specific)
+            val kmpSourceRoots = kmpModules.flatMap {
+                sourceRootsForPlatform(it.sourceRoots + it.testSourceRoots, platform)
+            }
+            val targetSourceRoots = targets.flatMap { it.sourceRoots + it.testSourceRoots }
+            val sourceRoots = (kmpSourceRoots + targetSourceRoots).toMutableList()
+
+            val kmpClasspath = kmpModules.flatMap { it.classpath + it.testClasspath }
+            val targetClasspath = targets.flatMap { it.classpath + it.testClasspath }
+            val classpath = (kmpClasspath + targetClasspath).toMutableList()
+
+            // For JVM/Android: also include non-KMP modules (they're JVM by default)
+            if (platform == KmpPlatform.JVM || platform == KmpPlatform.ANDROID) {
+                sourceRoots.addAll(nonKmpModules.flatMap { it.sourceRoots + it.testSourceRoots })
+                classpath.addAll(nonKmpModules.flatMap { it.classpath + it.testClasspath })
             }
 
-            // Source roots: module-level roots + target-specific roots
-            val moduleSourceRoots = projectModel.modules.flatMap { it.sourceRoots + it.testSourceRoots }.distinct()
-            val targetSourceRoots = targets.flatMap { it.sourceRoots + it.testSourceRoots }
-            val allRoots = (moduleSourceRoots + targetSourceRoots).distinct()
-
-            // Classpath: module-level + target-specific
-            val moduleClasspath = projectModel.modules.flatMap { it.classpath + it.testClasspath }
-            val targetClasspath = targets.flatMap { it.classpath + it.testClasspath }
-            val allClasspath = (moduleClasspath + targetClasspath).distinct()
-
             val includeJdk = platform == KmpPlatform.JVM || platform == KmpPlatform.ANDROID
-            System.err.println("[session] Building $platform session: ${allRoots.size} source roots, ${allClasspath.size} classpath entries")
-            platform to buildSingleSession(platformType, allRoots, allClasspath, includeJdk)
-        }.toMap()
+            System.err.println("[session] Building $platform session: ${sourceRoots.distinct().size} source roots, ${classpath.distinct().size} classpath entries")
+            result[platform] = buildSingleSession(platformTypeFor(platform), sourceRoots.distinct(), classpath.distinct(), includeJdk)
+        }
+
+        // Ensure JVM session exists for non-KMP modules in mixed projects
+        if (KmpPlatform.JVM !in result && nonKmpModules.any { (it.sourceRoots + it.testSourceRoots).isNotEmpty() }) {
+            val jvmSources = nonKmpModules.flatMap { it.sourceRoots + it.testSourceRoots }.toMutableList()
+            // Include KMP common/JVM source roots for cross-module resolution
+            jvmSources.addAll(kmpModules.flatMap {
+                sourceRootsForPlatform(it.sourceRoots + it.testSourceRoots, KmpPlatform.JVM)
+            })
+            val jvmCp = (nonKmpModules.flatMap { it.classpath + it.testClasspath } +
+                kmpModules.flatMap { it.classpath + it.testClasspath }).toMutableList()
+
+            System.err.println("[session] Building synthetic JVM session for ${nonKmpModules.size} non-KMP modules: ${jvmSources.distinct().size} source roots, ${jvmCp.distinct().size} classpath entries")
+            result[KmpPlatform.JVM] = buildSingleSession(JvmPlatforms.defaultJvmPlatform, jvmSources.distinct(), jvmCp.distinct(), true)
+        }
+
+        return result
     }
 
     private fun kmpPlatformForFile(file: Path): KmpPlatform {

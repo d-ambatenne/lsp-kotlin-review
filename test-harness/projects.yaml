@@ -95,6 +95,12 @@ projects:
     type: kmp
     features: [hover, definition, diagnostics]
 
+  - name: compose-multiplatform
+    repo: https://github.com/JetBrains/compose-multiplatform
+    branch: master
+    type: kmp
+    features: [hover, definition, diagnostics, completion, references, symbols]
+
 thresholds:
   hover_success_rate: 0.5
   definition_success_rate: 0.4
