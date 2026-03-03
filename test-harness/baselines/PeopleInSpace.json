@@ -2,49 +2,49 @@
   "name": "PeopleInSpace",
   "type": "kmp",
   "files_tested": 15,
-  "startup_time_s": 13.237,
+  "startup_time_s": 25.251,
   "server_crashed": false,
   "hover": {
-    "total": 534,
-    "resolved": 534,
+    "total": 543,
+    "resolved": 543,
     "unresolved": 0,
     "errors": 0,
     "success_rate": 1
   },
   "definition": {
     "total": 357,
-    "resolved": 353,
-    "unresolved": 4,
+    "resolved": 345,
+    "unresolved": 12,
     "errors": 0,
-    "success_rate": 0.988795518207283
+    "success_rate": 0.9663865546218487
   },
   "diagnostics": {
     "files_opened": 15,
     "files_with_diagnostics": 6,
-    "total_diagnostics": 13,
-    "errors": 10,
-    "warnings": 3,
+    "total_diagnostics": 18,
+    "errors": 13,
+    "warnings": 5,
     "info": 0,
     "hints": 0,
     "server_crashes": 0
   },
   "completion": {
-    "positions_tested": 248,
-    "non_empty": 100,
-    "empty": 148,
+    "positions_tested": 238,
+    "non_empty": 93,
+    "empty": 145,
     "errors": 0,
-    "success_rate": 0.4032258064516129
+    "success_rate": 0.3907563025210084
   },
   "references": {
-    "total": 254,
-    "resolved": 206,
-    "unresolved": 48,
+    "total": 252,
+    "resolved": 151,
+    "unresolved": 101,
     "errors": 0,
-    "success_rate": 0.8110236220472441
+    "success_rate": 0.5992063492063492
   },
   "symbols": {
     "files_tested": 15,
-    "total_symbols": 44,
+    "total_symbols": 107,
     "files_with_symbols": 15,
     "files_empty": 0,
     "errors": 0,

@@ -2,49 +2,49 @@
   "name": "nowinandroid",
   "type": "android",
   "files_tested": 15,
-  "startup_time_s": 9.234,
+  "startup_time_s": 22.266,
   "server_crashed": false,
   "hover": {
-    "total": 566,
-    "resolved": 562,
+    "total": 554,
+    "resolved": 550,
     "unresolved": 4,
     "errors": 0,
-    "success_rate": 0.9929328621908127
+    "success_rate": 0.9927797833935018
   },
   "definition": {
-    "total": 399,
-    "resolved": 395,
-    "unresolved": 4,
+    "total": 396,
+    "resolved": 390,
+    "unresolved": 6,
     "errors": 0,
-    "success_rate": 0.9899749373433584
+    "success_rate": 0.9848484848484849
   },
   "diagnostics": {
     "files_opened": 15,
-    "files_with_diagnostics": 3,
-    "total_diagnostics": 18,
-    "errors": 15,
+    "files_with_diagnostics": 4,
+    "total_diagnostics": 20,
+    "errors": 17,
     "warnings": 3,
     "info": 0,
     "hints": 0,
     "server_crashes": 0
   },
   "completion": {
-    "positions_tested": 257,
-    "non_empty": 107,
+    "positions_tested": 252,
+    "non_empty": 102,
     "empty": 150,
     "errors": 0,
-    "success_rate": 0.4163424124513619
+    "success_rate": 0.40476190476190477
   },
   "references": {
     "total": 278,
-    "resolved": 266,
-    "unresolved": 12,
+    "resolved": 260,
+    "unresolved": 18,
     "errors": 0,
-    "success_rate": 0.9568345323741008
+    "success_rate": 0.935251798561151
   },
   "symbols": {
     "files_tested": 15,
-    "total_symbols": 80,
+    "total_symbols": 77,
     "files_with_symbols": 15,
     "files_empty": 0,
     "errors": 0,

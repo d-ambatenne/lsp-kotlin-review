@@ -2,7 +2,7 @@
   "name": "spring-boot-kotlin-boilerplate",
   "type": "jvm",
   "files_tested": 15,
-  "startup_time_s": 9.395,
+  "startup_time_s": 14.298,
   "server_crashed": false,
   "hover": {
     "total": 388,
