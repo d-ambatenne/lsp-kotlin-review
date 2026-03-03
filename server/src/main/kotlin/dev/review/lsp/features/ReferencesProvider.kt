@@ -10,12 +10,17 @@ class ReferencesProvider(private val facade: CompilerFacade) {
 
     fun references(params: ReferenceParams): CompletableFuture<List<Location>> {
         return CompletableFuture.supplyAsync {
-            val path = UriUtil.toPath(params.textDocument.uri)
-            val (line, col) = PositionConverter.fromLspPosition(params.position)
-            val symbol = facade.resolveAtPosition(path, line, col)
-                ?: return@supplyAsync emptyList()
+            try {
+                val path = UriUtil.toPath(params.textDocument.uri)
+                val (line, col) = PositionConverter.fromLspPosition(params.position)
+                val symbol = facade.resolveAtPosition(path, line, col)
+                    ?: return@supplyAsync emptyList()
 
-            facade.findReferences(symbol).map { PositionConverter.toLspLocation(it) }
+                facade.findReferences(symbol).map { PositionConverter.toLspLocation(it) }
+            } catch (e: Exception) {
+                System.err.println("[provider] Error in references: ${e.message}")
+                emptyList()
+            }
         }
     }
 }

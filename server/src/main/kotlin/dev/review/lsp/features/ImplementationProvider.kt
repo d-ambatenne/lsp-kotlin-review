@@ -11,22 +11,27 @@ class ImplementationProvider(private val facade: CompilerFacade) {
 
     fun implementation(params: ImplementationParams): CompletableFuture<Either<List<Location>, List<LocationLink>>> {
         return CompletableFuture.supplyAsync {
-            val path = UriUtil.toPath(params.textDocument.uri)
-            val (line, col) = PositionConverter.fromLspPosition(params.position)
-            val symbol = facade.resolveAtPosition(path, line, col)
-                ?: return@supplyAsync Either.forLeft(emptyList())
+            try {
+                val path = UriUtil.toPath(params.textDocument.uri)
+                val (line, col) = PositionConverter.fromLspPosition(params.position)
+                val symbol = facade.resolveAtPosition(path, line, col)
+                    ?: return@supplyAsync Either.forLeft(emptyList())
 
-            val results = mutableListOf<Location>()
+                val results = mutableListOf<Location>()
 
-            // Check for expect/actual counterparts (KMP cross-platform navigation)
-            val counterparts = facade.findExpectActualCounterparts(path, line, col)
-            results.addAll(counterparts.map { PositionConverter.toLspLocation(it.location) })
+                // Check for expect/actual counterparts (KMP cross-platform navigation)
+                val counterparts = facade.findExpectActualCounterparts(path, line, col)
+                results.addAll(counterparts.map { PositionConverter.toLspLocation(it.location) })
 
-            // Also check for class/interface implementations
-            val impls = facade.findImplementations(symbol)
-            results.addAll(impls.map { PositionConverter.toLspLocation(it) })
+                // Also check for class/interface implementations
+                val impls = facade.findImplementations(symbol)
+                results.addAll(impls.map { PositionConverter.toLspLocation(it) })
 
-            Either.forLeft(results)
+                Either.forLeft(results)
+            } catch (e: Exception) {
+                System.err.println("[provider] Error in implementation: ${e.message}")
+                Either.forLeft(emptyList())
+            }
         }
     }
 }

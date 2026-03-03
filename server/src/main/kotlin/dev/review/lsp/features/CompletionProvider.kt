@@ -12,31 +12,36 @@ class CompletionProvider(private val facade: CompilerFacade) {
 
     fun completion(params: CompletionParams): CompletableFuture<Either<List<CompletionItem>, CompletionList>> {
         return CompletableFuture.supplyAsync {
-            val path = UriUtil.toPath(params.textDocument.uri)
-            val (line, col) = PositionConverter.fromLspPosition(params.position)
-            val candidates = facade.getCompletions(path, line, col)
+            try {
+                val path = UriUtil.toPath(params.textDocument.uri)
+                val (line, col) = PositionConverter.fromLspPosition(params.position)
+                val candidates = facade.getCompletions(path, line, col)
 
-            val items = candidates.map { candidate ->
-                CompletionItem(candidate.label).apply {
-                    kind = toLspCompletionKind(candidate.kind)
-                    detail = candidate.detail
-                    insertText = candidate.insertText
-                    if (candidate.isDeprecated) {
-                        tags = listOf(CompletionItemTag.Deprecated)
+                val items = candidates.map { candidate ->
+                    CompletionItem(candidate.label).apply {
+                        kind = toLspCompletionKind(candidate.kind)
+                        detail = candidate.detail
+                        insertText = candidate.insertText
+                        if (candidate.isDeprecated) {
+                            tags = listOf(CompletionItemTag.Deprecated)
+                        }
+                        sortText = String.format("%d_%s", candidate.sortPriority, candidate.label.lowercase())
                     }
-                    sortText = String.format("%d_%s", candidate.sortPriority, candidate.label.lowercase())
+                }.toMutableList()
+
+                // Add Kotlin keyword completions (only for non-dot completion)
+                val isDotCompletion = candidates.any { it.sortPriority < 0 } // dot completions have negative priority
+                    || params.context?.triggerCharacter == "."
+                if (!isDotCompletion) {
+                    val prefix = extractPrefix(params)
+                    items.addAll(keywordCompletions(prefix))
                 }
-            }.toMutableList()
 
-            // Add Kotlin keyword completions (only for non-dot completion)
-            val isDotCompletion = candidates.any { it.sortPriority < 0 } // dot completions have negative priority
-                || params.context?.triggerCharacter == "."
-            if (!isDotCompletion) {
-                val prefix = extractPrefix(params)
-                items.addAll(keywordCompletions(prefix))
+                Either.forLeft(items as List<CompletionItem>)
+            } catch (e: Exception) {
+                System.err.println("[provider] Error in completion: ${e.message}")
+                Either.forLeft(emptyList())
             }
-
-            Either.forLeft(items as List<CompletionItem>)
         }
     }
 

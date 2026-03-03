@@ -1394,7 +1394,7 @@ class AnalysisApiCompilerFacade(
     }
 
     private fun <T> runOnAnalysisThread(block: () -> T): T {
-        return analysisThread.submit(block).get()
+        return analysisThread.submit(block).get(30, java.util.concurrent.TimeUnit.SECONDS)
     }
 
     private fun mapDiagnostic(diagnostic: KaDiagnosticWithPsi<*>, file: Path): DiagnosticInfo? {

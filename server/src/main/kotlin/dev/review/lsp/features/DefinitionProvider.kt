@@ -11,13 +11,18 @@ class DefinitionProvider(private val facade: CompilerFacade) {
 
     fun definition(params: DefinitionParams): CompletableFuture<Either<List<Location>, List<LocationLink>>> {
         return CompletableFuture.supplyAsync {
-            val path = UriUtil.toPath(params.textDocument.uri)
-            val (line, col) = PositionConverter.fromLspPosition(params.position)
-            val symbol = facade.resolveAtPosition(path, line, col)
-                ?: return@supplyAsync Either.forLeft(emptyList())
+            try {
+                val path = UriUtil.toPath(params.textDocument.uri)
+                val (line, col) = PositionConverter.fromLspPosition(params.position)
+                val symbol = facade.resolveAtPosition(path, line, col)
+                    ?: return@supplyAsync Either.forLeft(emptyList())
 
-            val location = PositionConverter.toLspLocation(symbol.location)
-            Either.forLeft(listOf(location))
+                val location = PositionConverter.toLspLocation(symbol.location)
+                Either.forLeft(listOf(location))
+            } catch (e: Exception) {
+                System.err.println("[provider] Error in definition: ${e.message}")
+                Either.forLeft(emptyList())
+            }
         }
     }
 }

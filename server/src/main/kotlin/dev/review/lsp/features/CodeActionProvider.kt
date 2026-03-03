@@ -14,63 +14,68 @@ class CodeActionProvider(
 
     fun codeAction(params: CodeActionParams): CompletableFuture<List<Either<Command, CodeAction>>> {
         return CompletableFuture.supplyAsync {
-            val path = UriUtil.toPath(params.textDocument.uri)
-            val diagnostics = facade.getDiagnostics(path)
+            try {
+                val path = UriUtil.toPath(params.textDocument.uri)
+                val diagnostics = facade.getDiagnostics(path)
 
-            val result = mutableListOf<Either<Command, CodeAction>>()
-            var addedGenerateSourcesAction = false
+                val result = mutableListOf<Either<Command, CodeAction>>()
+                var addedGenerateSourcesAction = false
 
-            for (diag in diagnostics) {
-                val diagRange = PositionConverter.toLspRange(diag.range)
-                if (!rangesOverlap(params.range, diagRange)) continue
+                for (diag in diagnostics) {
+                    val diagRange = PositionConverter.toLspRange(diag.range)
+                    if (!rangesOverlap(params.range, diagRange)) continue
 
-                for (fix in diag.quickFixes) {
-                    val changes = fix.edits.groupBy { UriUtil.toUri(it.path) }
-                        .mapValues { (_, fileEdits) ->
-                            fileEdits.map { edit ->
-                                TextEdit(PositionConverter.toLspRange(edit.range), edit.newText)
+                    for (fix in diag.quickFixes) {
+                        val changes = fix.edits.groupBy { UriUtil.toUri(it.path) }
+                            .mapValues { (_, fileEdits) ->
+                                fileEdits.map { edit ->
+                                    TextEdit(PositionConverter.toLspRange(edit.range), edit.newText)
+                                }
                             }
+
+                        val action = CodeAction(fix.title).apply {
+                            kind = CodeActionKind.QuickFix
+                            edit = WorkspaceEdit(changes)
+                            this.diagnostics = listOf(Diagnostic(
+                                diagRange,
+                                diag.message,
+                                null,
+                                "kotlin-review",
+                                diag.code
+                            ))
                         }
-
-                    val action = CodeAction(fix.title).apply {
-                        kind = CodeActionKind.QuickFix
-                        edit = WorkspaceEdit(changes)
-                        this.diagnostics = listOf(Diagnostic(
-                            diagRange,
-                            diag.message,
-                            null,
-                            "kotlin-review",
-                            diag.code
-                        ))
+                        result.add(Either.forRight(action))
                     }
-                    result.add(Either.forRight(action))
+
+                    // For unresolved references with the generated-class hint, add a "generate sources" action
+                    if (!addedGenerateSourcesAction &&
+                        diag.code == "UNRESOLVED_REFERENCE" &&
+                        diag.message.contains("generated class")) {
+                        val action = CodeAction("Run Gradle code generation").apply {
+                            kind = CodeActionKind.QuickFix
+                            command = Command(
+                                "Run Gradle code generation",
+                                "kotlinReview.generateSources",
+                                listOf(projectDir?.toString() ?: "")
+                            )
+                            this.diagnostics = listOf(Diagnostic(
+                                diagRange,
+                                diag.message,
+                                null,
+                                "kotlin-review",
+                                diag.code
+                            ))
+                        }
+                        result.add(Either.forRight(action))
+                        addedGenerateSourcesAction = true
+                    }
                 }
 
-                // For unresolved references with the generated-class hint, add a "generate sources" action
-                if (!addedGenerateSourcesAction &&
-                    diag.code == "UNRESOLVED_REFERENCE" &&
-                    diag.message.contains("generated class")) {
-                    val action = CodeAction("Run Gradle code generation").apply {
-                        kind = CodeActionKind.QuickFix
-                        command = Command(
-                            "Run Gradle code generation",
-                            "kotlinReview.generateSources",
-                            listOf(projectDir?.toString() ?: "")
-                        )
-                        this.diagnostics = listOf(Diagnostic(
-                            diagRange,
-                            diag.message,
-                            null,
-                            "kotlin-review",
-                            diag.code
-                        ))
-                    }
-                    result.add(Either.forRight(action))
-                    addedGenerateSourcesAction = true
-                }
+                result
+            } catch (e: Exception) {
+                System.err.println("[provider] Error in codeAction: ${e.message}")
+                emptyList()
             }
-
-            result
         }
     }
 

@@ -129,18 +129,30 @@ class KotlinTextDocumentService : TextDocumentService {
     // P0 features
 
     override fun definition(params: DefinitionParams): CompletableFuture<Either<List<Location>, List<LocationLink>>> {
-        return definitionProvider?.definition(params)
-            ?: CompletableFuture.completedFuture(Either.forLeft(emptyList()))
+        return (definitionProvider?.definition(params)
+            ?: CompletableFuture.completedFuture(Either.forLeft(emptyList())))
+            .exceptionally { e ->
+                System.err.println("[service] Error in definition: ${e.message}")
+                Either.forLeft(emptyList())
+            }
     }
 
     override fun references(params: ReferenceParams): CompletableFuture<List<Location>> {
-        return referencesProvider?.references(params)
-            ?: CompletableFuture.completedFuture(emptyList())
+        return (referencesProvider?.references(params)
+            ?: CompletableFuture.completedFuture(emptyList()))
+            .exceptionally { e ->
+                System.err.println("[service] Error in references: ${e.message}")
+                emptyList()
+            }
     }
 
     override fun hover(params: HoverParams): CompletableFuture<Hover?> {
-        return hoverProvider?.hover(params)
+        val future: CompletableFuture<Hover?> = hoverProvider?.hover(params)
             ?: CompletableFuture.completedFuture(null)
+        return future.exceptionally { e ->
+            System.err.println("[service] Error in hover: ${e.message}")
+            null
+        }
     }
 
     override fun documentSymbol(params: DocumentSymbolParams): CompletableFuture<List<Either<SymbolInformation, DocumentSymbol>>> {
@@ -149,38 +161,66 @@ class KotlinTextDocumentService : TextDocumentService {
 
         return provider.documentSymbol(params).thenApply { symbols ->
             symbols.map { Either.forRight<SymbolInformation, DocumentSymbol>(it) }
+        }.exceptionally { e ->
+            System.err.println("[service] Error in documentSymbol: ${e.message}")
+            emptyList()
         }
     }
 
     // P1 features
 
     override fun implementation(params: ImplementationParams): CompletableFuture<Either<List<Location>, List<LocationLink>>> {
-        return implementationProvider?.implementation(params)
-            ?: CompletableFuture.completedFuture(Either.forLeft(emptyList()))
+        return (implementationProvider?.implementation(params)
+            ?: CompletableFuture.completedFuture(Either.forLeft(emptyList())))
+            .exceptionally { e ->
+                System.err.println("[service] Error in implementation: ${e.message}")
+                Either.forLeft(emptyList())
+            }
     }
 
     override fun typeDefinition(params: TypeDefinitionParams): CompletableFuture<Either<List<Location>, List<LocationLink>>> {
-        return typeDefinitionProvider?.typeDefinition(params)
-            ?: CompletableFuture.completedFuture(Either.forLeft(emptyList()))
+        return (typeDefinitionProvider?.typeDefinition(params)
+            ?: CompletableFuture.completedFuture(Either.forLeft(emptyList())))
+            .exceptionally { e ->
+                System.err.println("[service] Error in typeDefinition: ${e.message}")
+                Either.forLeft(emptyList())
+            }
     }
 
     override fun prepareRename(params: PrepareRenameParams): CompletableFuture<Either3<Range, PrepareRenameResult, PrepareRenameDefaultBehavior>> {
         val provider = renameProvider ?: return CompletableFuture.completedFuture(null)
-        return provider.prepareRename(params).thenApply { it }
+        val future: CompletableFuture<Either3<Range, PrepareRenameResult, PrepareRenameDefaultBehavior>?> =
+            provider.prepareRename(params)
+        return future.exceptionally { e ->
+            System.err.println("[service] Error in prepareRename: ${e.message}")
+            null
+        }.thenApply { it }
     }
 
     override fun rename(params: RenameParams): CompletableFuture<WorkspaceEdit?> {
-        return renameProvider?.rename(params)
+        val future: CompletableFuture<WorkspaceEdit?> = renameProvider?.rename(params)
             ?: CompletableFuture.completedFuture(null)
+        return future.exceptionally { e ->
+            System.err.println("[service] Error in rename: ${e.message}")
+            null
+        }
     }
 
     override fun codeAction(params: CodeActionParams): CompletableFuture<List<Either<Command, CodeAction>>> {
-        return codeActionProvider?.codeAction(params)
-            ?: CompletableFuture.completedFuture(emptyList())
+        return (codeActionProvider?.codeAction(params)
+            ?: CompletableFuture.completedFuture(emptyList()))
+            .exceptionally { e ->
+                System.err.println("[service] Error in codeAction: ${e.message}")
+                emptyList()
+            }
     }
 
     override fun completion(params: CompletionParams): CompletableFuture<Either<List<CompletionItem>, CompletionList>> {
-        return completionProvider?.completion(params)
-            ?: CompletableFuture.completedFuture(Either.forLeft(emptyList()))
+        return (completionProvider?.completion(params)
+            ?: CompletableFuture.completedFuture(Either.forLeft(emptyList())))
+            .exceptionally { e ->
+                System.err.println("[service] Error in completion: ${e.message}")
+                Either.forLeft(emptyList())
+            }
     }
 }

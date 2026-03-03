@@ -11,12 +11,17 @@ class TypeDefinitionProvider(private val facade: CompilerFacade) {
 
     fun typeDefinition(params: TypeDefinitionParams): CompletableFuture<Either<List<Location>, List<LocationLink>>> {
         return CompletableFuture.supplyAsync {
-            val path = UriUtil.toPath(params.textDocument.uri)
-            val (line, col) = PositionConverter.fromLspPosition(params.position)
-            val location = facade.getTypeDefinitionLocation(path, line, col)
-                ?: return@supplyAsync Either.forLeft(emptyList())
+            try {
+                val path = UriUtil.toPath(params.textDocument.uri)
+                val (line, col) = PositionConverter.fromLspPosition(params.position)
+                val location = facade.getTypeDefinitionLocation(path, line, col)
+                    ?: return@supplyAsync Either.forLeft(emptyList())
 
-            Either.forLeft(listOf(PositionConverter.toLspLocation(location)))
+                Either.forLeft(listOf(PositionConverter.toLspLocation(location)))
+            } catch (e: Exception) {
+                System.err.println("[provider] Error in typeDefinition: ${e.message}")
+                Either.forLeft(emptyList())
+            }
         }
     }
 }

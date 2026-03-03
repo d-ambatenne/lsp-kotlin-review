@@ -11,31 +11,41 @@ class RenameProvider(private val facade: CompilerFacade) {
 
     fun prepareRename(params: PrepareRenameParams): CompletableFuture<Either3<Range, PrepareRenameResult, PrepareRenameDefaultBehavior>?> {
         return CompletableFuture.supplyAsync {
-            val path = UriUtil.toPath(params.textDocument.uri)
-            val (line, col) = PositionConverter.fromLspPosition(params.position)
-            val ctx = facade.prepareRename(path, line, col) ?: return@supplyAsync null
-            val range = PositionConverter.toLspRange(ctx.range)
-            Either3.forSecond(PrepareRenameResult(range, ctx.symbol.name))
+            try {
+                val path = UriUtil.toPath(params.textDocument.uri)
+                val (line, col) = PositionConverter.fromLspPosition(params.position)
+                val ctx = facade.prepareRename(path, line, col) ?: return@supplyAsync null
+                val range = PositionConverter.toLspRange(ctx.range)
+                Either3.forSecond(PrepareRenameResult(range, ctx.symbol.name))
+            } catch (e: Exception) {
+                System.err.println("[provider] Error in prepareRename: ${e.message}")
+                null
+            }
         }
     }
 
     fun rename(params: RenameParams): CompletableFuture<WorkspaceEdit?> {
         return CompletableFuture.supplyAsync {
-            val path = UriUtil.toPath(params.textDocument.uri)
-            val (line, col) = PositionConverter.fromLspPosition(params.position)
-            val ctx = facade.prepareRename(path, line, col) ?: return@supplyAsync null
+            try {
+                val path = UriUtil.toPath(params.textDocument.uri)
+                val (line, col) = PositionConverter.fromLspPosition(params.position)
+                val ctx = facade.prepareRename(path, line, col) ?: return@supplyAsync null
 
-            val edits = facade.computeRename(ctx, params.newName)
-            if (edits.isEmpty()) return@supplyAsync null
+                val edits = facade.computeRename(ctx, params.newName)
+                if (edits.isEmpty()) return@supplyAsync null
 
-            val changes = edits.groupBy { UriUtil.toUri(it.path) }
-                .mapValues { (_, fileEdits) ->
-                    fileEdits.map { edit ->
-                        TextEdit(PositionConverter.toLspRange(edit.range), edit.newText)
+                val changes = edits.groupBy { UriUtil.toUri(it.path) }
+                    .mapValues { (_, fileEdits) ->
+                        fileEdits.map { edit ->
+                            TextEdit(PositionConverter.toLspRange(edit.range), edit.newText)
+                        }
                     }
-                }
 
-            WorkspaceEdit(changes)
+                WorkspaceEdit(changes)
+            } catch (e: Exception) {
+                System.err.println("[provider] Error in rename: ${e.message}")
+                null
+            }
         }
     }
 }
