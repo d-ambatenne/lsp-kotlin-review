@@ -95,10 +95,11 @@ projects:
     type: kmp
     features: [hover, definition, diagnostics]
 
-  - name: compose-multiplatform
+  - name: compose-multiplatform-chat
     repo: https://github.com/JetBrains/compose-multiplatform
     branch: master
     type: kmp
+    subdir: examples/chat
     features: [hover, definition, diagnostics, completion, references, symbols]
 
 thresholds:
