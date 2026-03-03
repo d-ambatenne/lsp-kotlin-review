@@ -2,7 +2,7 @@
   "name": "kotlinconf-app",
   "type": "kmp",
   "files_tested": 15,
-  "startup_time_s": 11.227,
+  "startup_time_s": 44.258,
   "server_crashed": false,
   "hover": {
     "total": 491,
@@ -29,18 +29,18 @@
     "server_crashes": 0
   },
   "completion": {
-    "positions_tested": 243,
-    "non_empty": 101,
-    "empty": 142,
+    "positions_tested": 168,
+    "non_empty": 107,
+    "empty": 61,
     "errors": 0,
-    "success_rate": 0.4156378600823045
+    "success_rate": 0.6369047619047619
   },
   "references": {
     "total": 283,
-    "resolved": 258,
-    "unresolved": 25,
+    "resolved": 254,
+    "unresolved": 29,
     "errors": 0,
-    "success_rate": 0.911660777385159
+    "success_rate": 0.8975265017667845
   },
   "symbols": {
     "files_tested": 15,

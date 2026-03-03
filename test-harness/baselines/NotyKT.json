@@ -2,14 +2,14 @@
   "name": "NotyKT",
   "type": "android",
   "files_tested": 15,
-  "startup_time_s": 6.262,
+  "startup_time_s": 36.243,
   "server_crashed": false,
   "hover": {
-    "total": 611,
-    "resolved": 610,
+    "total": 602,
+    "resolved": 601,
     "unresolved": 1,
     "errors": 0,
-    "success_rate": 0.9983633387888707
+    "success_rate": 0.9983388704318937
   },
   "definition": {
     "total": 408,
@@ -29,11 +29,11 @@
     "server_crashes": 0
   },
   "completion": {
-    "positions_tested": 250,
-    "non_empty": 100,
-    "empty": 150,
+    "positions_tested": 208,
+    "non_empty": 111,
+    "empty": 97,
     "errors": 0,
-    "success_rate": 0.4
+    "success_rate": 0.5336538461538461
   },
   "references": {
     "total": 287,

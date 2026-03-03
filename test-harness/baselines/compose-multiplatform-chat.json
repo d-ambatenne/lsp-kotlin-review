@@ -2,7 +2,7 @@
   "name": "compose-multiplatform-chat",
   "type": "kmp",
   "files_tested": 13,
-  "startup_time_s": 134.406,
+  "startup_time_s": 24.24,
   "server_crashed": false,
   "hover": {
     "total": 429,
@@ -29,25 +29,25 @@
     "server_crashes": 0
   },
   "completion": {
-    "positions_tested": 201,
-    "non_empty": 89,
-    "empty": 112,
+    "positions_tested": 165,
+    "non_empty": 104,
+    "empty": 61,
     "errors": 0,
-    "success_rate": 0.4427860696517413
+    "success_rate": 0.6303030303030303
   },
   "references": {
-    "total": 219,
-    "resolved": 27,
-    "unresolved": 192,
+    "total": 223,
+    "resolved": 133,
+    "unresolved": 90,
     "errors": 0,
-    "success_rate": 0.1232876712328767
+    "success_rate": 0.5964125560538116
   },
   "symbols": {
     "files_tested": 13,
-    "total_symbols": 0,
-    "files_with_symbols": 0,
-    "files_empty": 13,
+    "total_symbols": 49,
+    "files_with_symbols": 13,
+    "files_empty": 0,
     "errors": 0,
-    "success_rate": 0
+    "success_rate": 1
   }
 }

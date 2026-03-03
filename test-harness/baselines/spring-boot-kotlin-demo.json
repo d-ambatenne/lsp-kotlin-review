@@ -2,7 +2,7 @@
   "name": "spring-boot-kotlin-demo",
   "type": "jvm",
   "files_tested": 4,
-  "startup_time_s": 3.264,
+  "startup_time_s": 11.222,
   "server_crashed": false,
   "hover": {
     "total": 90,
@@ -29,11 +29,11 @@
     "server_crashes": 0
   },
   "completion": {
-    "positions_tested": 51,
+    "positions_tested": 29,
     "non_empty": 17,
-    "empty": 34,
+    "empty": 12,
     "errors": 0,
-    "success_rate": 0.3333333333333333
+    "success_rate": 0.5862068965517241
   },
   "references": {
     "total": 60,

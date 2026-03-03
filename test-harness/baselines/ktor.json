@@ -2,6 +2,6 @@
   "name": "ktor",
   "type": "kmp",
   "files_tested": 15,
-  "startup_time_s": 5.231,
+  "startup_time_s": 20.242,
   "server_crashed": true
 }

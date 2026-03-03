@@ -2,7 +2,7 @@
   "name": "compose-samples-jetsnack",
   "type": "android",
   "files_tested": 15,
-  "startup_time_s": 5.273,
+  "startup_time_s": 34.253,
   "server_crashed": true,
   "hover": {
     "total": 657,

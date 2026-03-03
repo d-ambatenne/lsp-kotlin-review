@@ -2,7 +2,7 @@
   "name": "spring-petclinic-kotlin",
   "type": "jvm",
   "files_tested": 15,
-  "startup_time_s": 16.246,
+  "startup_time_s": 7.224,
   "server_crashed": false,
   "hover": {
     "total": 318,
@@ -29,11 +29,11 @@
     "server_crashes": 0
   },
   "completion": {
-    "positions_tested": 220,
+    "positions_tested": 117,
     "non_empty": 74,
-    "empty": 146,
+    "empty": 43,
     "errors": 0,
-    "success_rate": 0.33636363636363636
+    "success_rate": 0.6324786324786325
   },
   "references": {
     "total": 238,
