@@ -923,7 +923,12 @@ class AnalysisApiCompilerFacade(
 
                     val receiverName = detectDotReceiver(bufferText, line, column)
                     if (receiverName != null) {
-                        collectMemberCompletionsByName(ktFile, receiverName, prefix, seen, candidates, limit)
+                        collectMemberCompletionsByName(ktFile, receiverName, prefix, seen, candidates, limit, line, column)
+                        // Fallback: if dot completion found nothing, try scope completion
+                        if (candidates.isEmpty()) {
+                            val element = findElementAt(ktFile, line, column) ?: ktFile
+                            collectScopeCompletions(element, prefix, seen, candidates, limit)
+                        }
                     } else {
                         val element = findElementAt(ktFile, line, column) ?: ktFile
                         collectScopeCompletions(element, prefix, seen, candidates, limit)
@@ -1071,6 +1076,7 @@ class AnalysisApiCompilerFacade(
     /**
      * Dot/member completion: find a declaration by name in PSI, resolve its type,
      * and enumerate members. Works even when PSI is stale (between saves).
+     * Falls back to scopeContext-based resolution when PSI search fails.
      */
     private fun org.jetbrains.kotlin.analysis.api.KaSession.collectMemberCompletionsByName(
         ktFile: KtFile,
@@ -1078,15 +1084,40 @@ class AnalysisApiCompilerFacade(
         prefix: String,
         seen: MutableSet<String>,
         candidates: MutableList<CompletionCandidate>,
-        limit: Int
+        limit: Int,
+        line: Int,
+        column: Int
     ) {
-        // Find the declaration by name in the PSI (searches local scope, file scope, etc.)
-        val decl = findDeclarationByName(ktFile, receiverName) ?: return
-        val type = try {
-            (decl.symbol as? KaCallableSymbol)?.returnType ?: return
-        } catch (_: Exception) { return }
+        // Try PSI-based declaration search first
+        val classSymbol: KaClassSymbol? = run psiSearch@{
+            val decl = findDeclarationByName(ktFile, receiverName) ?: return@psiSearch null
+            val type = try {
+                (decl.symbol as? KaCallableSymbol)?.returnType
+            } catch (_: Exception) { null }
+            (type as? KaClassType)?.symbol as? KaClassSymbol
+        } ?: run scopeFallback@{
+            // Fallback: use scopeContext to find the receiver symbol
+            val element = findElementAt(ktFile, line, column) ?: return@scopeFallback null
+            val ktElement = element as? KtElement ?: return@scopeFallback null
+            val scopeCtx = try {
+                ktElement.containingKtFile.scopeContext(ktElement)
+            } catch (_: Exception) { return@scopeFallback null }
 
-        val classSymbol = (type as? KaClassType)?.symbol as? KaClassSymbol ?: return
+            var found: KaClassSymbol? = null
+            for (scopeWithKind in scopeCtx.scopes) {
+                if (found != null) break
+                val matchingCallables = scopeWithKind.scope.callables { it.asString() == receiverName }
+                for (callable in matchingCallables) {
+                    val returnType = (callable as? KaCallableSymbol)?.returnType
+                    val cls = (returnType as? KaClassType)?.symbol as? KaClassSymbol
+                    if (cls != null) { found = cls; break }
+                }
+            }
+            found
+        }
+
+        if (classSymbol == null) return
+
         val memberScope = try {
             classSymbol.combinedMemberScope
         } catch (e: Exception) {
@@ -1118,14 +1149,29 @@ class AnalysisApiCompilerFacade(
                     return decl
                 }
                 if (decl is KtClassOrObject) {
+                    // Search constructor parameters (val/var properties)
+                    (decl as? KtClass)?.primaryConstructorParameters?.forEach { param ->
+                        if (param.name == name) return param
+                    }
                     search(decl.declarations)?.let { return it }
                 }
-                // Search inside function bodies for local declarations
+                // Search inside function bodies for local declarations and parameters
                 if (decl is KtDeclarationWithBody) {
+                    // Search function value parameters
+                    if (decl is KtNamedFunction) {
+                        decl.valueParameters.forEach { param ->
+                            if (param.name == name) return param
+                        }
+                    }
                     val body = decl.bodyBlockExpression ?: continue
                     for (stmt in body.statements) {
                         if (stmt is KtCallableDeclaration && (stmt as? KtNamedDeclaration)?.name == name) {
                             return stmt
+                        }
+                        // Search for-loop variables
+                        if (stmt is KtForExpression) {
+                            val loopParam = stmt.loopParameter
+                            if (loopParam != null && loopParam.name == name) return loopParam
                         }
                     }
                 }

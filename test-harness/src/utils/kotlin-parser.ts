@@ -78,6 +78,8 @@ export function findDotCompletionPositions(source: string): SymbolLocation[] {
     const line = lines[lineIdx];
     const trimmed = line.trim();
     if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed === '') continue;
+    // Skip import/package lines — dots are package separators, not member access
+    if (trimmed.startsWith('import ') || trimmed.startsWith('package ')) continue;
 
     // Find dots that are likely member access (not in strings/comments)
     const dotRegex = /(\w+)\./g;
