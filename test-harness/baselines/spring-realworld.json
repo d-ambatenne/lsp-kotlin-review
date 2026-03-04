@@ -2,49 +2,49 @@
   "name": "spring-realworld",
   "type": "jvm",
   "files_tested": 15,
-  "startup_time_s": 1.21,
+  "startup_time_s": 1.201,
   "server_crashed": false,
   "hover": {
-    "total": 518,
-    "resolved": 400,
-    "unresolved": 118,
+    "total": 488,
+    "resolved": 382,
+    "unresolved": 106,
     "errors": 0,
-    "success_rate": 0.7722007722007722
+    "success_rate": 0.7827868852459017
   },
   "definition": {
-    "total": 385,
-    "resolved": 294,
-    "unresolved": 91,
+    "total": 354,
+    "resolved": 278,
+    "unresolved": 76,
     "errors": 0,
-    "success_rate": 0.7636363636363637
+    "success_rate": 0.7853107344632768
   },
   "diagnostics": {
     "files_opened": 15,
-    "files_with_diagnostics": 15,
-    "total_diagnostics": 386,
-    "errors": 367,
-    "warnings": 19,
+    "files_with_diagnostics": 13,
+    "total_diagnostics": 368,
+    "errors": 365,
+    "warnings": 3,
     "info": 0,
     "hints": 0,
     "server_crashes": 0
   },
   "completion": {
-    "positions_tested": 164,
-    "non_empty": 105,
-    "empty": 59,
+    "positions_tested": 177,
+    "non_empty": 177,
+    "empty": 0,
     "errors": 0,
-    "success_rate": 0.6402439024390244
+    "success_rate": 1
   },
   "references": {
-    "total": 277,
-    "resolved": 218,
-    "unresolved": 59,
+    "total": 263,
+    "resolved": 199,
+    "unresolved": 64,
     "errors": 0,
-    "success_rate": 0.7870036101083032
+    "success_rate": 0.7566539923954373
   },
   "symbols": {
     "files_tested": 15,
-    "total_symbols": 71,
+    "total_symbols": 79,
     "files_with_symbols": 15,
     "files_empty": 0,
     "errors": 0,

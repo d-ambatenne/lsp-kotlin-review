@@ -2,7 +2,7 @@
   "name": "spring-guides-kotlin",
   "type": "jvm",
   "files_tested": 8,
-  "startup_time_s": 11.221,
+  "startup_time_s": 3.202,
   "server_crashed": false,
   "hover": {
     "total": 268,
@@ -30,10 +30,10 @@
   },
   "completion": {
     "positions_tested": 84,
-    "non_empty": 49,
-    "empty": 35,
+    "non_empty": 84,
+    "empty": 0,
     "errors": 0,
-    "success_rate": 0.5833333333333334
+    "success_rate": 1
   },
   "references": {
     "total": 146,

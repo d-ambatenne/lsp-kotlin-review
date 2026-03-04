@@ -2,7 +2,7 @@
   "name": "Pokedex",
   "type": "android",
   "files_tested": 15,
-  "startup_time_s": 13.262,
+  "startup_time_s": 5.207,
   "server_crashed": false,
   "hover": {
     "total": 522,
@@ -29,11 +29,11 @@
     "server_crashes": 0
   },
   "completion": {
-    "positions_tested": 209,
-    "non_empty": 121,
-    "empty": 88,
+    "positions_tested": 207,
+    "non_empty": 207,
+    "empty": 0,
     "errors": 0,
-    "success_rate": 0.5789473684210527
+    "success_rate": 1
   },
   "references": {
     "total": 253,

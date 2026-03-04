@@ -2,18 +2,18 @@
   "name": "compose-samples-jetcaster",
   "type": "android",
   "files_tested": 15,
-  "startup_time_s": 14.235,
+  "startup_time_s": 5.204,
   "server_crashed": false,
   "hover": {
-    "total": 402,
-    "resolved": 402,
+    "total": 449,
+    "resolved": 449,
     "unresolved": 0,
     "errors": 0,
     "success_rate": 1
   },
   "definition": {
-    "total": 306,
-    "resolved": 306,
+    "total": 333,
+    "resolved": 333,
     "unresolved": 0,
     "errors": 0,
     "success_rate": 1
@@ -29,15 +29,15 @@
     "server_crashes": 0
   },
   "completion": {
-    "positions_tested": 113,
-    "non_empty": 57,
-    "empty": 56,
+    "positions_tested": 130,
+    "non_empty": 130,
+    "empty": 0,
     "errors": 0,
-    "success_rate": 0.504424778761062
+    "success_rate": 1
   },
   "symbols": {
     "files_tested": 15,
-    "total_symbols": 46,
+    "total_symbols": 53,
     "files_with_symbols": 15,
     "files_empty": 0,
     "errors": 0,

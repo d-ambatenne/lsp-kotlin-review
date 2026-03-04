@@ -2,7 +2,7 @@
   "name": "NotyKT",
   "type": "android",
   "files_tested": 15,
-  "startup_time_s": 36.243,
+  "startup_time_s": 5.207,
   "server_crashed": false,
   "hover": {
     "total": 602,
@@ -29,11 +29,11 @@
     "server_crashes": 0
   },
   "completion": {
-    "positions_tested": 208,
-    "non_empty": 111,
-    "empty": 97,
+    "positions_tested": 201,
+    "non_empty": 201,
+    "empty": 0,
     "errors": 0,
-    "success_rate": 0.5336538461538461
+    "success_rate": 1
   },
   "references": {
     "total": 287,
