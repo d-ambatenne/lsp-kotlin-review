@@ -1051,9 +1051,6 @@ class AnalysisApiCompilerFacade(
 
             val priority = scopePriority(scopeWithKind.kind)
 
-            // Skip library/import scopes when prefix is empty (too many results, not useful)
-            if (priority >= 2 && prefix.isEmpty()) continue
-
             val scope = scopeWithKind.scope
 
             for (symbol in scope.callables(nameFilter)) {
@@ -1088,8 +1085,27 @@ class AnalysisApiCompilerFacade(
         line: Int,
         column: Int
     ) {
-        // Try PSI-based declaration search first
-        val classSymbol: KaClassSymbol? = run psiSearch@{
+        // Handle "this" and "super" receivers by walking PSI to enclosing class
+        val classSymbol: KaClassSymbol? = if (receiverName == "this" || receiverName == "super") {
+            val element = findElementAt(ktFile, line, column)
+            var enclosing: com.intellij.psi.PsiElement? = element
+            while (enclosing != null && enclosing !is KtClassOrObject) {
+                enclosing = enclosing.parent
+            }
+            val enclosingClass = enclosing as? KtClassOrObject
+            if (enclosingClass != null) {
+                try {
+                    val classSym = enclosingClass.symbol as? KaClassSymbol
+                    if (receiverName == "super") {
+                        val superType = classSym?.superTypes?.firstOrNull()
+                        (superType as? KaClassType)?.symbol as? KaClassSymbol
+                    } else {
+                        classSym
+                    }
+                } catch (_: Exception) { null }
+            } else null
+        } else run psiSearch@{
+            // Try PSI-based declaration search first
             val decl = findDeclarationByName(ktFile, receiverName) ?: return@psiSearch null
             val type = try {
                 (decl.symbol as? KaCallableSymbol)?.returnType

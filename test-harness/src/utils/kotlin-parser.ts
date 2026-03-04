@@ -80,6 +80,8 @@ export function findDotCompletionPositions(source: string): SymbolLocation[] {
     if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed === '') continue;
     // Skip import/package lines — dots are package separators, not member access
     if (trimmed.startsWith('import ') || trimmed.startsWith('package ')) continue;
+    // Skip annotation lines — dots are package separators (e.g. @dagger.Module)
+    if (trimmed.startsWith('@')) continue;
 
     // Find dots that are likely member access (not in strings/comments)
     const dotRegex = /(\w+)\./g;

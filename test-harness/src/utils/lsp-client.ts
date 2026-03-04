@@ -44,6 +44,7 @@ export class LspClient {
   private _messages: string[] = [];
   private _stderr: string[] = [];
   private _serverCrashed = false;
+  private _consecutiveFailures = 0;
 
   constructor(private options: LspClientOptions) {}
 
@@ -74,7 +75,9 @@ export class LspClient {
     this.process.stderr?.on('data', (data: Buffer) => {
       const text = data.toString();
       this._stderr.push(text);
-      if (text.includes('Exception') || text.includes('OutOfMemoryError')) {
+      // Only flag truly fatal JVM errors — not normal handled exceptions
+      // (e.g. Gradle fallback logs contain "Exception" but the server is healthy)
+      if (text.includes('OutOfMemoryError') || text.includes('StackOverflowError')) {
         this._serverCrashed = true;
       }
     });
@@ -170,6 +173,17 @@ export class LspClient {
     return { uri, diagnostics: this._diagnostics.get(uri) ?? [] };
   }
 
+  private onRequestSuccess(): void {
+    this._consecutiveFailures = 0;
+  }
+
+  private onRequestFailure(): void {
+    this._consecutiveFailures++;
+    if (this._consecutiveFailures >= 3) {
+      this._serverCrashed = true;
+    }
+  }
+
   async hover(uri: string, line: number, character: number): Promise<Hover | null> {
     if (!this.connection) throw new Error('Not connected');
 
@@ -182,8 +196,10 @@ export class LspClient {
         this.options.requestTimeoutMs ?? 10000,
         'Hover request timed out',
       ) as Hover | null;
+      this.onRequestSuccess();
       return result;
     } catch {
+      this.onRequestFailure();
       return null;
     }
   }
@@ -200,6 +216,7 @@ export class LspClient {
         this.options.requestTimeoutMs ?? 10000,
         'Definition request timed out',
       ) as any;
+      this.onRequestSuccess();
       if (!result) return [];
       if (Array.isArray(result)) {
         return result.map((r: any) => 'uri' in r ? r as Location : { uri: r.targetUri, range: r.targetRange });
@@ -207,6 +224,7 @@ export class LspClient {
       if (typeof result === 'object' && 'uri' in result) return [result as Location];
       return [];
     } catch {
+      this.onRequestFailure();
       return [];
     }
   }
@@ -227,10 +245,12 @@ export class LspClient {
         this.options.requestTimeoutMs ?? 10000,
         'Completion request timed out',
       ) as any;
+      this.onRequestSuccess();
       if (!result) return [];
       if (Array.isArray(result)) return result;
       return result.items ?? [];
     } catch {
+      this.onRequestFailure();
       return [];
     }
   }
@@ -246,6 +266,7 @@ export class LspClient {
         this.options.requestTimeoutMs ?? 10000,
         'DocumentSymbol request timed out',
       ) as any;
+      this.onRequestSuccess();
       if (!result || !Array.isArray(result) || result.length === 0) return [];
       // DocumentSymbol has 'range' + 'selectionRange', SymbolInformation has 'location'
       if ('range' in result[0]) {
@@ -262,6 +283,7 @@ export class LspClient {
       }
       return [];
     } catch {
+      this.onRequestFailure();
       return [];
     }
   }
@@ -279,8 +301,10 @@ export class LspClient {
         this.options.requestTimeoutMs ?? 10000,
         'References request timed out',
       ) as Location[] | null;
+      this.onRequestSuccess();
       return result ?? [];
     } catch {
+      this.onRequestFailure();
       return [];
     }
   }
