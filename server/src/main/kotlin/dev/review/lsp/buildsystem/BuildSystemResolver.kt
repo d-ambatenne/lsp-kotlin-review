@@ -53,9 +53,25 @@ class BuildSystemResolver(
 
     suspend fun resolve(workspaceRoot: Path, variant: String = "debug"): Pair<BuildSystemProvider, ProjectModel> {
         val (provider, projectDir) = detect(workspaceRoot)
+
+        // Try disk cache first (skips Gradle entirely if build files unchanged)
+        if (provider !== manualProvider) {
+            val cache = ProjectModelCache(projectDir)
+            val cached = cache.load()
+            if (cached != null) {
+                System.err.println("[cache] Using cached project model (${cached.modules.size} modules)")
+                return provider to cached.copy(projectDir = projectDir, variant = variant)
+            }
+        }
+
         return try {
             val model = provider.resolve(projectDir, variant)
-            provider to model.copy(projectDir = projectDir, variant = variant)
+            val result = model.copy(projectDir = projectDir, variant = variant)
+            // Save to disk cache for next startup
+            if (provider !== manualProvider) {
+                ProjectModelCache(projectDir).save(result)
+            }
+            provider to result
         } catch (e: Exception) {
             if (provider === manualProvider) throw e
             // Gradle (or other provider) failed -- fall back to ManualProvider

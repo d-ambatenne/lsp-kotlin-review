@@ -70,6 +70,8 @@ class AnalysisApiCompilerFacade(
     private val klibStubCache = ConcurrentHashMap<String, List<Path>>()
     // ConcurrentHashMap doesn't allow null values — use Optional to wrap nullable Path
     private val aarExtractionCache = ConcurrentHashMap<Path, java.util.Optional<Path>>()
+    // Cache for library stub files: FQN -> (stubPath, lineNumber for the class/member declaration)
+    private val libraryStubCache = ConcurrentHashMap<String, SourceLocation>()
 
     init {
         sessions = buildSessions()
@@ -386,6 +388,12 @@ class AnalysisApiCompilerFacade(
                 append(renderType(symbol.returnType))
             }
             is KaClassSymbol -> buildString {
+                // Show package for library types
+                val fqn = symbol.classId?.asFqNameString()
+                val pkg = symbol.classId?.packageFqName?.asString()
+                if (pkg != null && pkg.isNotEmpty() && pkg != "<root>") {
+                    append("// $pkg\n")
+                }
                 val keyword = when (symbol.classKind) {
                     KaClassKind.INTERFACE -> "interface "
                     KaClassKind.ENUM_CLASS -> "enum class "
@@ -402,6 +410,22 @@ class AnalysisApiCompilerFacade(
                     append(keyword)
                 }
                 append(symbol.classId?.shortClassName?.asString() ?: symbolName(symbol) ?: "?")
+                // Render type parameters
+                val typeParams = symbol.typeParameters
+                if (typeParams.isNotEmpty()) {
+                    append("<")
+                    append(typeParams.joinToString(", ") { tp ->
+                        val name = tp.name.asString()
+                        val bounds = tp.upperBounds.filter {
+                            val classId = (it as? KaClassType)?.classId
+                            classId?.asFqNameString() != "kotlin.Any"
+                        }
+                        if (bounds.isNotEmpty()) {
+                            "$name : ${bounds.joinToString(", ") { renderType(it) }}"
+                        } else name
+                    })
+                    append(">")
+                }
                 // For data classes, render primary constructor parameters
                 if (psi != null && psi.isData()) {
                     val params = psi.primaryConstructorParameters
@@ -414,6 +438,17 @@ class AnalysisApiCompilerFacade(
                             "$prefix$name: $type"
                         })
                         append(")")
+                    }
+                }
+                // Show supertypes for library classes
+                if (psi == null) {
+                    val supers = symbol.superTypes.filter {
+                        val classId = (it as? KaClassType)?.classId
+                        classId?.asFqNameString() != "kotlin.Any"
+                    }
+                    if (supers.isNotEmpty()) {
+                        append(" : ")
+                        append(supers.joinToString(", ") { renderType(it) })
                     }
                 }
             }
@@ -561,6 +596,129 @@ class AnalysisApiCompilerFacade(
         }
     }
 
+    /**
+     * Generate a Kotlin stub file for a library class and return the SourceLocation
+     * pointing to a specific member (by name) or the class declaration itself.
+     * Must be called inside an analyze {} block.
+     */
+    private fun org.jetbrains.kotlin.analysis.api.KaSession.generateLibraryStub(
+        classSymbol: KaClassSymbol,
+        targetMemberName: String? = null
+    ): SourceLocation? {
+        val classId = classSymbol.classId ?: return null
+        val fqn = classId.asFqNameString()
+        val cacheKey = if (targetMemberName != null) "$fqn#$targetMemberName" else fqn
+
+        libraryStubCache[cacheKey]?.let { return it }
+
+        // Generate stub content
+        val pkg = classId.packageFqName.asString()
+        val className = classId.shortClassName.asString()
+        val sb = StringBuilder()
+        sb.appendLine("// Generated stub for library class — not editable")
+        sb.appendLine("// Source: ${classId.asFqNameString()}")
+        sb.appendLine()
+        if (pkg.isNotEmpty() && pkg != "<root>") {
+            sb.appendLine("package $pkg")
+            sb.appendLine()
+        }
+
+        // Class declaration line
+        val classLine = sb.toString().count { it == '\n' }
+        val keyword = when (classSymbol.classKind) {
+            KaClassKind.INTERFACE -> "interface"
+            KaClassKind.ENUM_CLASS -> "enum class"
+            KaClassKind.OBJECT -> "object"
+            KaClassKind.COMPANION_OBJECT -> "companion object"
+            KaClassKind.ANNOTATION_CLASS -> "annotation class"
+            else -> "class"
+        }
+        sb.append("$keyword $className")
+
+        // Type parameters
+        val typeParams = classSymbol.typeParameters
+        if (typeParams.isNotEmpty()) {
+            sb.append("<")
+            sb.append(typeParams.joinToString(", ") { tp ->
+                val name = tp.name.asString()
+                val bounds = tp.upperBounds.filter {
+                    (it as? KaClassType)?.classId?.asFqNameString() != "kotlin.Any"
+                }
+                if (bounds.isNotEmpty()) "$name : ${bounds.joinToString(", ") { renderType(it) }}"
+                else name
+            })
+            sb.append(">")
+        }
+
+        // Supertypes
+        val supers = classSymbol.superTypes.filter {
+            val sid = (it as? KaClassType)?.classId
+            sid?.asFqNameString() != "kotlin.Any" && sid?.asFqNameString() != "java.lang.Object"
+        }
+        if (supers.isNotEmpty()) {
+            sb.append(" : ")
+            sb.append(supers.joinToString(", ") { renderType(it) })
+        }
+        sb.appendLine(" {")
+        sb.appendLine()
+
+        // Track member line numbers
+        val memberLines = mutableMapOf<String, Int>()
+
+        // Render members from combinedMemberScope
+        try {
+            val scope = classSymbol.combinedMemberScope
+            // Properties
+            for (prop in scope.callables { true }) {
+                if (prop is KaPropertySymbol) {
+                    val name = prop.name.asString()
+                    if (name.startsWith("<")) continue
+                    memberLines[name] = sb.toString().count { it == '\n' }
+                    val valVar = if (prop.isVal) "val" else "var"
+                    sb.appendLine("    $valVar $name: ${renderType(prop.returnType)}")
+                }
+            }
+            sb.appendLine()
+            // Functions
+            for (fn in scope.callables { true }) {
+                if (fn is KaNamedFunctionSymbol) {
+                    val name = fn.name.asString()
+                    if (name.startsWith("<")) continue
+                    memberLines[name] = sb.toString().count { it == '\n' }
+                    sb.append("    fun $name(")
+                    sb.append(fn.valueParameters.joinToString(", ") { p ->
+                        "${p.name.asString()}: ${renderType(p.returnType)}"
+                    })
+                    sb.appendLine("): ${renderType(fn.returnType)}")
+                }
+            }
+        } catch (_: Exception) {
+            sb.appendLine("    // (members unavailable)")
+        }
+
+        sb.appendLine("}")
+
+        // Write stub to disk
+        val stubDir = projectModel.projectDir?.resolve(".kotlin-review/stubs")
+            ?: return null
+        val stubPath = stubDir.resolve(fqn.replace('.', '/') + ".kt")
+        try {
+            java.nio.file.Files.createDirectories(stubPath.parent)
+            java.nio.file.Files.writeString(stubPath, sb.toString())
+        } catch (_: Exception) {
+            return null
+        }
+
+        // Cache locations
+        val classLoc = SourceLocation(stubPath, classLine, 0)
+        libraryStubCache[fqn] = classLoc
+        for ((memberName, memberLine) in memberLines) {
+            libraryStubCache["$fqn#$memberName"] = SourceLocation(stubPath, memberLine, 4)
+        }
+
+        return libraryStubCache[cacheKey] ?: classLoc
+    }
+
     override fun resolveAtPosition(file: Path, line: Int, column: Int): ResolvedSymbol? {
         val ktFile = findKtFile(file) ?: return null
         return try {
@@ -614,6 +772,18 @@ class AnalysisApiCompilerFacade(
                         // psi.text crashes on compiled class elements (ClsElementImpl)
                         // with NPE in ClsFileImpl.getMirror(). Use try-catch to detect this.
                         val psiText = try { psi?.text } catch (_: Exception) { null }
+                        // Extract FQN for both source and library symbols
+                        val fqn = when (symbol) {
+                            is KaClassSymbol -> symbol.classId?.asFqNameString()
+                            is KaConstructorSymbol -> symbol.containingClassId?.asFqNameString()
+                            is KaCallableSymbol -> symbol.callableId?.let {
+                                val pkg = it.packageName.asString()
+                                val cls = it.className?.asString()
+                                val name = it.callableName.asString()
+                                if (cls != null) "$pkg.$cls.$name" else "$pkg.$name"
+                            }
+                            else -> null
+                        }
                         if (psi != null && psiText != null) {
                             val loc = psiToSourceLocation(psi) ?: return@analyze null
                             ResolvedSymbol(
@@ -624,19 +794,40 @@ class AnalysisApiCompilerFacade(
                                 location = loc,
                                 containingClass = (psi.parent as? KtClassOrObject)?.name,
                                 signature = extractSignatureLine(psiText),
-                                fqName = null
+                                fqName = fqn
                             )
                         } else {
-                            // Library type — no readable PSI source available
+                            // Library type — generate stub file for navigation
+                            val classSymbol = when (symbol) {
+                                is KaClassSymbol -> symbol
+                                is KaConstructorSymbol -> {
+                                    val cid = symbol.containingClassId
+                                    if (cid != null) findClass(cid) as? KaClassSymbol else null
+                                }
+                                is KaCallableSymbol -> {
+                                    val cid = symbol.callableId?.className
+                                    if (cid != null) symbol.callableId?.classId?.let { findClass(it) as? KaClassSymbol }
+                                    else null
+                                }
+                                else -> null
+                            }
+                            val memberName = when (symbol) {
+                                is KaNamedFunctionSymbol -> symbol.name.asString()
+                                is KaPropertySymbol -> symbol.name.asString()
+                                else -> null
+                            }
+                            val stubLoc = if (classSymbol != null) {
+                                generateLibraryStub(classSymbol, memberName)
+                            } else null
                             val sig = renderSyntheticSignature(symbol)
                             val name = symbolName(symbol) ?: "unknown"
                             ResolvedSymbol(
                                 name = name,
                                 kind = mapKaSymbolKind(symbol),
-                                location = SourceLocation(file, line, column),
+                                location = stubLoc ?: SourceLocation(file, line, column),
                                 containingClass = null,
                                 signature = sig,
-                                fqName = null
+                                fqName = fqn
                             )
                         }
                     }
@@ -783,6 +974,12 @@ class AnalysisApiCompilerFacade(
         }
     }
 
+    /** Match two resolved symbols — prefer FQN comparison for library symbols. */
+    private fun symbolsMatch(a: ResolvedSymbol, b: ResolvedSymbol): Boolean {
+        if (a.fqName != null && b.fqName != null) return a.fqName == b.fqName
+        return a.location == b.location
+    }
+
     override fun findReferences(symbol: ResolvedSymbol): List<SourceLocation> {
         // Simple text-based search + resolve confirmation across all project files
         val results = mutableListOf<SourceLocation>()
@@ -800,7 +997,7 @@ class AnalysisApiCompilerFacade(
                 val col = idx - document.getLineStartOffset(line)
 
                 val resolved = resolveAtPosition(file, line, col)
-                if (resolved != null && resolved.location == symbol.location) {
+                if (resolved != null && symbolsMatch(resolved, symbol)) {
                     results.add(SourceLocation(file, line, col))
                 }
             }

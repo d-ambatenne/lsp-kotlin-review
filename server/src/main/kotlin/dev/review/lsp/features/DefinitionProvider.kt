@@ -17,6 +17,12 @@ class DefinitionProvider(private val facade: CompilerFacade) {
                 val symbol = facade.resolveAtPosition(path, line, col)
                     ?: return@supplyAsync Either.forLeft(emptyList())
 
+                // Skip if the definition points back to the usage site (library symbol with no source)
+                val usageLoc = dev.review.lsp.compiler.SourceLocation(path, line, col)
+                if (symbol.location == usageLoc) {
+                    return@supplyAsync Either.forLeft(emptyList())
+                }
+
                 val location = PositionConverter.toLspLocation(symbol.location)
                 Either.forLeft(listOf(location))
             } catch (e: Exception) {
