@@ -2,7 +2,9 @@ package dev.review.lsp
 
 import dev.review.lsp.analysis.AnalysisSession
 import dev.review.lsp.analysis.DiagnosticsPublisher
+import dev.review.lsp.analysis.WorkspaceManager
 import dev.review.lsp.buildsystem.BuildSystemResolver
+import dev.review.lsp.util.UriUtil
 import kotlinx.coroutines.*
 import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.jsonrpc.messages.Either
@@ -21,7 +23,7 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
     private var client: LanguageClient? = null
     private var workspaceRoot: String? = null
     private var rootPath: Path? = null
-    private var analysisSession: AnalysisSession? = null
+    private var workspaceManager: WorkspaceManager? = null
     private var buildVariant: String = "debug"
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val rebuildScheduler = Executors.newSingleThreadScheduledExecutor { r ->
@@ -66,28 +68,42 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
                 val rp = Paths.get(java.net.URI.create(root))
                 rootPath = rp
 
-                log(MessageType.Info, "Resolving build system (variant: $buildVariant)...")
-                val resolver = BuildSystemResolver()
-                val (provider, model) = resolver.resolve(rp, buildVariant)
+                log(MessageType.Info, "Discovering build roots (variant: $buildVariant)...")
+                val wm = WorkspaceManager(rp, buildVariant)
+                wm.discover()
+                workspaceManager = wm
 
-                log(MessageType.Info, "Detected build system: ${provider.id}")
+                if (wm.isSingleRoot()) {
+                    // Single root: resolve eagerly, wire up like before
+                    val singleRoot = wm.singleRoot()
+                    log(MessageType.Info, "Single build root: ${singleRoot.rootDir}")
 
-                val session = AnalysisSession(model)
-                analysisSession = session
+                    val facade = wm.resolveRoot(singleRoot.rootDir)
+                    if (facade == null) {
+                        log(MessageType.Error, "Failed to resolve build root")
+                        return@launch
+                    }
+                    val model = singleRoot.model ?: return@launch
 
-                val c = client ?: return@launch
-                val publisher = DiagnosticsPublisher(session.facade, c)
-                textDocumentService.setAnalysis(session.facade, publisher, model.projectDir)
+                    val c = client ?: return@launch
+                    val publisher = DiagnosticsPublisher(facade, c)
+                    textDocumentService.setAnalysis(facade, publisher, model.projectDir)
+
+                    log(MessageType.Info, "Analysis session ready (${model.modules.size} module(s))")
+                    checkAndroidBuildHint(model, c)
+                } else {
+                    // Multi root: set workspace manager on text doc service, resolve lazily
+                    log(MessageType.Info, "Multi-root workspace: ${wm.allRoots().size} build roots")
+                    for (rootDir in wm.allRoots()) {
+                        log(MessageType.Info, "  Build root: $rootDir")
+                    }
+                    textDocumentService.setWorkspaceManager(wm)
+                }
 
                 // Wire up workspace service callbacks — debounced to batch rapid changes
-                workspaceService.onBuildFileChanged = { scheduleRebuild() }
-                workspaceService.onGeneratedSourcesChanged = { scheduleRebuild() }
-                workspaceService.onConfigurationChanged = { scheduleRebuild() }
-
-                log(MessageType.Info, "Analysis session ready (${model.modules.size} module(s))")
-
-                // Show hint for Android projects missing generated sources
-                checkAndroidBuildHint(model, c)
+                workspaceService.onBuildFileChanged = { uri -> scheduleRebuild(uri) }
+                workspaceService.onGeneratedSourcesChanged = { uri -> scheduleRebuild(uri) }
+                workspaceService.onConfigurationChanged = { scheduleRebuild(null) }
 
                 // Register file watchers for build files
                 registerFileWatchers()
@@ -139,30 +155,47 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
         }
     }
 
-    private fun scheduleRebuild() {
+    private fun scheduleRebuild(changedUri: String?) {
         pendingRebuild?.cancel(false)
         pendingRebuild = rebuildScheduler.schedule({
-            rebuildSession()
+            rebuildForUri(changedUri)
         }, REBUILD_DEBOUNCE_MS, TimeUnit.MILLISECONDS)
     }
 
-    private fun rebuildSession() {
-        val rp = rootPath ?: return
+    private fun rebuildForUri(changedUri: String?) {
+        val wm = workspaceManager ?: return
         scope.launch {
             try {
-                log(MessageType.Info, "Rebuilding analysis session (variant: $buildVariant)...")
-                val resolver = BuildSystemResolver()
-                val (provider, model) = resolver.resolve(rp, buildVariant)
+                // Determine which build root to rebuild
+                val targetRoot = if (changedUri != null) {
+                    try {
+                        val filePath = UriUtil.toPath(changedUri)
+                        wm.buildRootForFile(filePath)
+                    } catch (_: Exception) { null }
+                } else null
 
-                log(MessageType.Info, "Rebuilt with build system: ${provider.id}")
-
-                val session = analysisSession
-                if (session != null) {
-                    val newFacade = session.rebuild(model)
+                if (wm.isSingleRoot()) {
+                    // Single root: rebuild the one root
+                    val rootDir = wm.singleRoot().rootDir
+                    log(MessageType.Info, "Rebuilding analysis session (variant: $buildVariant)...")
+                    val newFacade = wm.rebuildRoot(rootDir) ?: return@launch
+                    val model = wm.singleRoot().model ?: return@launch
                     val c = client ?: return@launch
                     val publisher = DiagnosticsPublisher(newFacade, c)
                     textDocumentService.setAnalysis(newFacade, publisher, model.projectDir)
                     log(MessageType.Info, "Analysis session rebuilt (${model.modules.size} module(s))")
+                } else if (targetRoot != null) {
+                    // Multi root: rebuild only the affected root
+                    log(MessageType.Info, "Rebuilding build root: ${targetRoot.fileName}...")
+                    wm.rebuildRoot(targetRoot)
+                    log(MessageType.Info, "Build root rebuilt: ${targetRoot.fileName}")
+                } else {
+                    // No URI or couldn't determine root — rebuild all resolved roots
+                    log(MessageType.Info, "Rebuilding all resolved build roots...")
+                    for (rootDir in wm.allRoots()) {
+                        wm.rebuildRoot(rootDir)
+                    }
+                    log(MessageType.Info, "All build roots rebuilt")
                 }
             } catch (e: Exception) {
                 log(MessageType.Error, "Failed to rebuild analysis session: ${e.message}")
@@ -174,7 +207,7 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
         pendingRebuild?.cancel(false)
         rebuildScheduler.shutdownNow()
         textDocumentService.shutdown()
-        analysisSession?.dispose()
+        workspaceManager?.dispose()
         scope.cancel()
         return CompletableFuture.completedFuture(null)
     }

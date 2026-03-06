@@ -10,6 +10,17 @@ class BuildSystemResolver(
 ) {
     private val manualProvider = ManualProvider()
 
+    private companion object {
+        /** Directories to skip during recursive build root discovery. */
+        val SKIP_DIRS = setOf("build", ".gradle", ".git", "node_modules", ".idea", "buildSrc", ".kotlin")
+
+        /** Marker files that indicate an independent Gradle build root. */
+        val SETTINGS_MARKERS = listOf("settings.gradle.kts", "settings.gradle")
+
+        /** Max directory depth for recursive build root discovery. */
+        const val MAX_DISCOVERY_DEPTH = 5
+    }
+
     /**
      * Detect the build system by checking for marker files at the workspace root
      * and in immediate child directories. Returns the matched provider and the
@@ -41,6 +52,63 @@ class BuildSystemResolver(
         }
 
         return manualProvider to workspaceRoot
+    }
+
+    /**
+     * Discover all independent build roots within a workspace by recursively
+     * searching for settings.gradle(.kts) files. Each discovered settings file
+     * indicates an independent Gradle build root.
+     *
+     * Skips build/, .gradle/, .git/, node_modules/, .idea/, buildSrc/, .kotlin/
+     * directories. Depth-limited to [MAX_DISCOVERY_DEPTH] levels.
+     *
+     * If no build roots are found, falls back to [detect] behavior.
+     */
+    fun discoverBuildRoots(workspaceRoot: Path): List<Pair<BuildSystemProvider, Path>> {
+        val roots = mutableListOf<Pair<BuildSystemProvider, Path>>()
+        discoverBuildRootsRecursive(workspaceRoot, 0, roots)
+
+        if (roots.isNotEmpty()) {
+            return roots
+        }
+
+        // Fall back to existing detect() behavior
+        val (provider, dir) = detect(workspaceRoot)
+        return listOf(provider to dir)
+    }
+
+    private fun discoverBuildRootsRecursive(
+        dir: Path,
+        depth: Int,
+        results: MutableList<Pair<BuildSystemProvider, Path>>
+    ) {
+        if (depth > MAX_DISCOVERY_DEPTH) return
+
+        // Check if this directory is a build root (has settings.gradle(.kts))
+        val hasSettings = SETTINGS_MARKERS.any { Files.exists(dir.resolve(it)) }
+        if (hasSettings) {
+            val provider = findBestProvider(dir)
+            if (provider != null) {
+                results.add(provider to dir)
+            }
+            // Don't recurse into subdirectories of a build root —
+            // subprojects within a Gradle build are part of that root,
+            // not independent build roots.
+            return
+        }
+
+        // Recurse into child directories
+        try {
+            Files.newDirectoryStream(dir) { Files.isDirectory(it) }.use { children ->
+                for (child in children) {
+                    val name = child.fileName.toString()
+                    if (name in SKIP_DIRS || name.startsWith(".")) continue
+                    discoverBuildRootsRecursive(child, depth + 1, results)
+                }
+            }
+        } catch (_: Exception) {
+            // Directory listing failed, skip
+        }
     }
 
     private fun findBestProvider(dir: Path): BuildSystemProvider? {

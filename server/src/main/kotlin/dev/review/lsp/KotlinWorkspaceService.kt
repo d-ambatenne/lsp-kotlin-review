@@ -6,11 +6,11 @@ import org.eclipse.lsp4j.services.WorkspaceService
 
 class KotlinWorkspaceService : WorkspaceService {
 
-    /** Callback invoked when a build file (build.gradle.kts, etc.) changes. */
-    var onBuildFileChanged: (() -> Unit)? = null
+    /** Callback invoked when a build file (build.gradle.kts, etc.) changes. URI of the first matching change is passed. */
+    var onBuildFileChanged: ((uri: String) -> Unit)? = null
 
-    /** Callback invoked when generated source files (build/generated/) change. */
-    var onGeneratedSourcesChanged: (() -> Unit)? = null
+    /** Callback invoked when generated source files (build/generated/) change. URI of the first matching change is passed. */
+    var onGeneratedSourcesChanged: ((uri: String) -> Unit)? = null
 
     /** Callback invoked when VS Code configuration changes. */
     var onConfigurationChanged: (() -> Unit)? = null
@@ -20,25 +20,25 @@ class KotlinWorkspaceService : WorkspaceService {
     }
 
     override fun didChangeWatchedFiles(params: DidChangeWatchedFilesParams) {
-        var buildFileChanged = false
-        var generatedChanged = false
+        var buildFileUri: String? = null
+        var generatedUri: String? = null
 
         for (change in params.changes) {
             val uri = change.uri
-            if (BUILD_FILE_PATTERNS.any { uri.endsWith(it) }) {
-                buildFileChanged = true
+            if (buildFileUri == null && BUILD_FILE_PATTERNS.any { uri.endsWith(it) }) {
+                buildFileUri = uri
             }
-            if (uri.contains("build/generated/")) {
-                generatedChanged = true
+            if (generatedUri == null && uri.contains("build/generated/")) {
+                generatedUri = uri
             }
         }
 
-        if (buildFileChanged) {
-            onBuildFileChanged?.invoke()
-        } else if (generatedChanged) {
+        if (buildFileUri != null) {
+            onBuildFileChanged?.invoke(buildFileUri)
+        } else if (generatedUri != null) {
             // Only rebuild for generated changes if no build file also changed
             // (build file change already triggers full rebuild)
-            onGeneratedSourcesChanged?.invoke()
+            onGeneratedSourcesChanged?.invoke(generatedUri)
         }
     }
 

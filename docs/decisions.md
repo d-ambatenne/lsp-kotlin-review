@@ -171,3 +171,67 @@ The only reliable path is `_session = buildSession()` which re-reads all files f
 **Decision**: Skip diagnostics on `didChange` (session immutable — ADR-16), serve cached diagnostics on `didOpen`, compute fresh diagnostics asynchronously, and guard against concurrent session rebuilds.
 **Rationale**: The Analysis API session is immutable after creation. `collectDiagnostics` on `didChange` returns identical results to the last `didSave`, wasting the single analysis thread. Auto-save triggers `didSave` frequently, causing cascading session rebuilds. Klib stub generation and AAR extraction are cached across rebuilds since they don't change between saves.
 **Trade-off**: Diagnostics only update on save (not on each keystroke). Acceptable for a code review tool. A concurrent rebuild guard (not time-based cooldown) ensures every save triggers a rebuild while preventing cascades.
+
+## ADR-27: Multi-Build Workspace Support for Repositories with Multiple Independent Gradle Roots
+**Decision**: Treat a VS Code workspace as potentially containing multiple independent Gradle builds. Discover all Gradle build roots in the workspace, maintain one `ProjectModel` and one `AnalysisSession` per build root, and route each Kotlin file to the owning build root based on directory containment first and resolved source roots second. Do not merge all workspace files into one global analysis session.
+**Rationale**: Some repositories are not a single Gradle build. The `compose-multiplatform` repository is a concrete example: it contains multiple independent Gradle roots (`components/`, `gradle-plugins/`, `html/`, `idea-plugin/`, `tooling/`, plus nested example and benchmark builds), included-build relationships, remapped project directories, and custom/generated source roots. The existing resolver assumes one build root per workspace and picks a single root-level or immediate-child build. This causes files outside that chosen build to fall back to incomplete or incorrect analysis, even when they belong to a valid Gradle subproject. A single merged Analysis API session is not appropriate because different build roots have different plugin management, repositories, source sets, included-build graphs, and generated sources.
+**What this enables**:
+- Opening a multi-build repository root in VS Code while preserving correct LSP behavior for Kotlin files across all contained Gradle builds
+- Correct ownership of files such as `gradle-plugins/compose/src/main/kotlin/.../ComposePlugin.kt` in `compose-multiplatform`
+- Independent Gradle resolution and analysis session lifecycle per build root
+- Future cross-build source navigation for included builds without flattening all builds into one classpath
+**Design**:
+1. **Build root discovery**
+   - Recursively discover Gradle build roots in the workspace
+   - A directory containing `settings.gradle.kts` or `settings.gradle` is a build root
+   - A directory with `build.gradle.kts` or `build.gradle` but no enclosing settings file may also be treated as a standalone root
+   - Ignore generated and irrelevant directories such as `build/`, `.gradle/`, `.git/`, and `node_modules/`
+2. **Per-build state**
+   - Maintain one `ProjectModel` per discovered build root
+   - Maintain one `AnalysisSession` per resolved build root
+   - Cache project models per build root, not per workspace
+3. **File routing**
+   - Before Gradle resolution, route a file to the nearest enclosing build root by directory containment
+   - After Gradle resolution, prefer routing based on actual source roots from the resolved `ProjectModel`
+   - If multiple build roots claim a file, prefer:
+     1. exact source-root ownership
+     2. nearest physical ancestor build root
+     3. last selected owner / user override
+4. **Resolution strategy**
+   - Discover build roots eagerly
+   - Resolve build roots lazily, on first file open or when needed
+   - Optionally prewarm nearby or recently used build roots in the background
+   - Rebuild only the affected build root when its build files or generated sources change
+5. **Included builds**
+   - Model included builds as relationships between build roots, not as one merged build
+   - Keep diagnostics, completion, and core analysis build-local
+   - Allow future source navigation across related build roots using a workspace-level FQN/source index
+6. **Fallback behavior**
+   - If `IdeaProject` resolution fails for one build root, fall back only for that build root
+   - Degraded fallback models must not be cached as authoritative
+   - Long-term fallback should emit a structured Gradle-derived model, not rely only on convention-based source root guessing
+**Trade-offs**:
+- More complex session management: the server must manage multiple active analysis sessions instead of one
+- Higher aggregate memory usage if many build roots are opened or prewarmed at once
+- Cross-build features such as references and rename become more complex and should remain build-local initially
+- Workspace discovery and routing logic become more sophisticated, especially for remapped project directories
+**Mitigations**:
+- Resolve build roots lazily instead of resolving the entire workspace at startup
+- Use per-build caches and session reuse
+- Use LRU/session eviction if memory becomes a concern
+- Keep rename and references build-local in the initial version
+**Alternatives rejected**:
+- **Single build root per workspace**: too weak for repositories like `compose-multiplatform`; many valid Kotlin files remain outside the selected build
+- **One global merged analysis session for the whole workspace**: incorrect for repositories with independent Gradle builds, differing repositories/plugins/properties, and included-build graphs
+- **Manual "open the correct subfolder" requirement**: workable but poor UX; defeats the goal of handling real-world monorepos and multi-build repos
+- **Convention-only multi-root fallback**: insufficient for custom source sets, generated sources, remapped project dirs, and included builds
+**Scope**:
+- Applies to Gradle build discovery and session management at the workspace level
+- Does not change the existing single-build architecture for normal repositories
+- Initial implementation should keep diagnostics, completion, references, and rename build-local
+- Cross-build navigation is allowed only as an additive enhancement after correct routing is in place
+**Consequences**:
+- The architecture evolves from "one workspace -> one project model -> one analysis session" to "one workspace -> many build roots -> many project models -> many analysis sessions"
+- `BuildSystemResolver` becomes responsible for discovering and selecting build roots, not just picking one provider/directory pair
+- A workspace-level routing layer becomes part of the server architecture
+- This provides a correct foundation for supporting repositories like `compose-multiplatform` from the repository root

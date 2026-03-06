@@ -47,99 +47,117 @@ class GradleProvider : BuildSystemProvider {
                 throw IllegalStateException(
                     "Gradle model fetch timed out after 300s. " +
                     "Try running './gradlew help' in the project first to warm up the cache.", e)
+            } catch (e: Exception) {
+                // IdeaProject model fetch failed (e.g. complex buildSrc, composite builds).
+                // The init script (which runs an actual Gradle task) may still work.
+                System.err.println("[gradle] IdeaProject model fetch failed: ${e.message}")
+                System.err.println("[gradle] Attempting init-script-only classpath resolution...")
+                null
             }
-            var modules = ideaProject.modules.mapNotNull { ideaModule ->
-                try {
-                    resolveModule(ideaModule, variant)
-                } catch (e: Exception) {
-                    System.err.println("Skipping module '${ideaModule.name}': ${e.message}")
-                    null
+
+            var modules = if (ideaProject != null) {
+                ideaProject.modules.mapNotNull { ideaModule ->
+                    try {
+                        resolveModule(ideaModule, variant)
+                    } catch (e: Exception) {
+                        System.err.println("Skipping module '${ideaModule.name}': ${e.message}")
+                        null
+                    }
                 }
+            } else {
+                // IdeaProject unavailable — run init script first to discover modules
+                val resolvedClasspaths = resolveClasspathViaInitScript(connection, workspaceRoot, variant)
+                val discoveredModules = buildModulesFromInitScript(resolvedClasspaths, variant)
+                System.err.println("[gradle] Init-script-only mode: discovered ${discoveredModules.size} modules with classpath")
+                discoveredModules
             }
 
             // IdeaProject/EclipseProject don't report dependencies for Android (AGP) modules.
             // Use a Gradle init script to resolve classpath directly.
             // Run for any project with Android modules OR modules with empty classpath,
             // and merge results (not just replace) to fill gaps in partial IdeaProject data.
-            val hasAndroid = modules.any { it.isAndroid }
-            val anyEmptyClasspath = modules.any { it.classpath.isEmpty() }
-            for (m in modules) {
-                System.err.println("[gradle] module '${m.name}': android=${m.isAndroid}, classpath=${m.classpath.size} entries, sources=${m.sourceRoots.size}")
-            }
-            System.err.println("[gradle] hasAndroid=$hasAndroid, anyEmptyClasspath=$anyEmptyClasspath")
-            if (hasAndroid || anyEmptyClasspath) {
-                try {
-                    System.err.println("[gradle] Running init script for classpath resolution (variant=$variant)...")
-                    val resolvedClasspaths = resolveClasspathViaInitScript(connection, workspaceRoot, variant)
-                    val resolvedCp = resolvedClasspaths.main
-                    val resolvedTestCp = resolvedClasspaths.test
-                    val resolvedKmp = resolvedClasspaths.kmp
-                    System.err.println("[gradle] Init script resolved ${resolvedCp.size} modules: ${resolvedCp.map { "${it.key}=${it.value.size}" }}")
-                    if (resolvedTestCp.isNotEmpty()) {
-                        System.err.println("[gradle] Init script resolved test classpath for ${resolvedTestCp.size} modules: ${resolvedTestCp.map { "${it.key}=${it.value.size}" }}")
-                    }
-                    if (resolvedKmp.isNotEmpty()) {
-                        System.err.println("[gradle] Init script resolved KMP classpaths for ${resolvedKmp.size} modules")
-                    }
-                    modules = modules.map { module ->
-                        var updated = module
-                        // Merge main classpath
-                        val cp = resolvedCp[module.name]
-                        if (cp != null && cp.isNotEmpty()) {
-                            val existingPaths = updated.classpath.map { it.normalize() }.toSet()
-                            val newEntries = cp.filter { it.normalize() !in existingPaths }
-                            System.err.println("[gradle] module '${module.name}': +${newEntries.size} new classpath entries from init script")
-                            if (newEntries.isNotEmpty()) {
-                                updated = updated.copy(classpath = updated.classpath + newEntries)
-                            }
+            // Skip if we already used init-script-only mode (ideaProject was null).
+            if (ideaProject != null) {
+                val hasAndroid = modules.any { it.isAndroid }
+                val anyEmptyClasspath = modules.any { it.classpath.isEmpty() }
+                for (m in modules) {
+                    System.err.println("[gradle] module '${m.name}': android=${m.isAndroid}, classpath=${m.classpath.size} entries, sources=${m.sourceRoots.size}")
+                }
+                System.err.println("[gradle] hasAndroid=$hasAndroid, anyEmptyClasspath=$anyEmptyClasspath")
+                if (hasAndroid || anyEmptyClasspath) {
+                    try {
+                        System.err.println("[gradle] Running init script for classpath resolution (variant=$variant)...")
+                        val resolvedClasspaths = resolveClasspathViaInitScript(connection, workspaceRoot, variant)
+                        val resolvedCp = resolvedClasspaths.main
+                        val resolvedTestCp = resolvedClasspaths.test
+                        val resolvedKmp = resolvedClasspaths.kmp
+                        System.err.println("[gradle] Init script resolved ${resolvedCp.size} modules: ${resolvedCp.map { "${it.key}=${it.value.size}" }}")
+                        if (resolvedTestCp.isNotEmpty()) {
+                            System.err.println("[gradle] Init script resolved test classpath for ${resolvedTestCp.size} modules: ${resolvedTestCp.map { "${it.key}=${it.value.size}" }}")
                         }
-                        // Merge test classpath
-                        val tcp = resolvedTestCp[module.name]
-                        if (tcp != null && tcp.isNotEmpty()) {
-                            val existingPaths = (updated.classpath + updated.testClasspath).map { it.normalize() }.toSet()
-                            val newEntries = tcp.filter { it.normalize() !in existingPaths }
-                            System.err.println("[gradle] module '${module.name}': +${newEntries.size} new test classpath entries from init script")
-                            if (newEntries.isNotEmpty()) {
-                                updated = updated.copy(testClasspath = updated.testClasspath + newEntries)
-                            }
+                        if (resolvedKmp.isNotEmpty()) {
+                            System.err.println("[gradle] Init script resolved KMP classpaths for ${resolvedKmp.size} modules")
                         }
-                        // Merge KMP per-target classpaths
-                        if (updated.targets.isNotEmpty()) {
-                            val moduleKmp = resolvedKmp[module.name]
-                            if (moduleKmp != null && moduleKmp.isNotEmpty()) {
-                                val updatedTargets = updated.targets.map { target ->
-                                    val existingPaths = target.classpath.map { it.normalize() }.toSet()
-                                    val newEntries = mutableListOf<Path>()
-                                    for ((configName, paths) in moduleKmp) {
-                                        val platform = configNameToKmpPlatform(configName) ?: continue
-                                        if (platform != target.platform) continue
-                                        for (p in paths) {
-                                            if (p.normalize() !in existingPaths && p !in newEntries) {
-                                                newEntries.add(p)
+                        modules = modules.map { module ->
+                            var updated = module
+                            // Merge main classpath
+                            val cp = resolvedCp[module.name]
+                            if (cp != null && cp.isNotEmpty()) {
+                                val existingPaths = updated.classpath.map { it.normalize() }.toSet()
+                                val newEntries = cp.filter { it.normalize() !in existingPaths }
+                                System.err.println("[gradle] module '${module.name}': +${newEntries.size} new classpath entries from init script")
+                                if (newEntries.isNotEmpty()) {
+                                    updated = updated.copy(classpath = updated.classpath + newEntries)
+                                }
+                            }
+                            // Merge test classpath
+                            val tcp = resolvedTestCp[module.name]
+                            if (tcp != null && tcp.isNotEmpty()) {
+                                val existingPaths = (updated.classpath + updated.testClasspath).map { it.normalize() }.toSet()
+                                val newEntries = tcp.filter { it.normalize() !in existingPaths }
+                                System.err.println("[gradle] module '${module.name}': +${newEntries.size} new test classpath entries from init script")
+                                if (newEntries.isNotEmpty()) {
+                                    updated = updated.copy(testClasspath = updated.testClasspath + newEntries)
+                                }
+                            }
+                            // Merge KMP per-target classpaths
+                            if (updated.targets.isNotEmpty()) {
+                                val moduleKmp = resolvedKmp[module.name]
+                                if (moduleKmp != null && moduleKmp.isNotEmpty()) {
+                                    val updatedTargets = updated.targets.map { target ->
+                                        val existingPaths = target.classpath.map { it.normalize() }.toSet()
+                                        val newEntries = mutableListOf<Path>()
+                                        for ((configName, paths) in moduleKmp) {
+                                            val platform = configNameToKmpPlatform(configName) ?: continue
+                                            if (platform != target.platform) continue
+                                            for (p in paths) {
+                                                if (p.normalize() !in existingPaths && p !in newEntries) {
+                                                    newEntries.add(p)
+                                                }
                                             }
                                         }
+                                        if (newEntries.isNotEmpty()) {
+                                            val jars = newEntries.count { it.toString().endsWith(".jar") }
+                                            val klibs = newEntries.count { it.toString().endsWith(".klib") }
+                                            val other = newEntries.size - jars - klibs
+                                            System.err.println("[gradle] module '${module.name}': KMP target '${target.name}' +${newEntries.size} classpath entries ($jars JARs, $klibs klibs${if (other > 0) ", $other other" else ""})")
+                                            target.copy(classpath = target.classpath + newEntries)
+                                        } else {
+                                            target
+                                        }
                                     }
-                                    if (newEntries.isNotEmpty()) {
-                                        val jars = newEntries.count { it.toString().endsWith(".jar") }
-                                        val klibs = newEntries.count { it.toString().endsWith(".klib") }
-                                        val other = newEntries.size - jars - klibs
-                                        System.err.println("[gradle] module '${module.name}': KMP target '${target.name}' +${newEntries.size} classpath entries ($jars JARs, $klibs klibs${if (other > 0) ", $other other" else ""})")
-                                        target.copy(classpath = target.classpath + newEntries)
-                                    } else {
-                                        target
-                                    }
+                                    updated = updated.copy(targets = updatedTargets)
                                 }
-                                updated = updated.copy(targets = updatedTargets)
                             }
+                            updated
                         }
-                        updated
+                    } catch (e: Exception) {
+                        System.err.println("[gradle] Init script classpath resolution failed: ${e.message}")
+                        e.printStackTrace(System.err)
                     }
-                } catch (e: Exception) {
-                    System.err.println("[gradle] Init script classpath resolution failed: ${e.message}")
-                    e.printStackTrace(System.err)
+                } else {
+                    System.err.println("[gradle] Skipping init script (no Android modules and no empty classpath)")
                 }
-            } else {
-                System.err.println("[gradle] Skipping init script (no Android modules and no empty classpath)")
             }
 
             // Warn about modules with sources but no classpath
@@ -283,7 +301,8 @@ class GradleProvider : BuildSystemProvider {
     private data class ResolvedClasspaths(
         val main: Map<String, List<Path>>,
         val test: Map<String, List<Path>>,
-        val kmp: Map<String, Map<String, List<Path>>> = emptyMap()  // module -> configName -> paths
+        val kmp: Map<String, Map<String, List<Path>>> = emptyMap(),  // module -> configName -> paths
+        val moduleDirs: Map<String, Path> = emptyMap()  // module name -> project directory
     )
 
     private fun resolveClasspathViaInitScript(
@@ -301,6 +320,9 @@ class GradleProvider : BuildSystemProvider {
                 allprojects {
                     task lspResolveClasspath {
                         doLast {
+                            // Output module directory for init-script-only fallback
+                            println "LSPDIR:" + project.name + ":" + project.projectDir.absolutePath
+
                             // List all resolvable compile-related configurations
                             // Use project.configurations explicitly — Gradle 8.14+ doesn't resolve
                             // bare 'configurations' inside doLast to the project scope
@@ -424,8 +446,19 @@ class GradleProvider : BuildSystemProvider {
             val mainResult = mutableMapOf<String, MutableList<Path>>()
             val testResult = mutableMapOf<String, MutableList<Path>>()
             val kmpResult = mutableMapOf<String, MutableMap<String, MutableList<Path>>>()
+            val dirResult = mutableMapOf<String, Path>()
             outputStream.toString().lines().forEach { line ->
                 when {
+                    line.startsWith("LSPDIR:") -> {
+                        val parts = line.removePrefix("LSPDIR:").split(":", limit = 2)
+                        if (parts.size == 2) {
+                            val moduleName = parts[0]
+                            val dirPath = Path.of(parts[1])
+                            if (Files.isDirectory(dirPath)) {
+                                dirResult[moduleName] = dirPath
+                            }
+                        }
+                    }
                     line.startsWith("LSPCP:") -> {
                         val parts = line.removePrefix("LSPCP:").split(":", limit = 2)
                         if (parts.size == 2) {
@@ -464,9 +497,116 @@ class GradleProvider : BuildSystemProvider {
                     line.startsWith("LSPDBG:") -> System.err.println("[gradle] $line")
                 }
             }
-            return ResolvedClasspaths(mainResult, testResult, kmpResult)
+            return ResolvedClasspaths(mainResult, testResult, kmpResult, dirResult)
         } finally {
             Files.deleteIfExists(initScript)
+        }
+    }
+
+    /**
+     * Build ModuleInfo list from init script output alone (no IdeaProject).
+     * Uses LSPDIR for module directories and LSPCP/LSPTCP for classpath.
+     */
+    private fun buildModulesFromInitScript(
+        resolved: ResolvedClasspaths,
+        variant: String
+    ): List<ModuleInfo> {
+        // Collect all module names seen in any output
+        val allModuleNames = (resolved.moduleDirs.keys +
+            resolved.main.keys +
+            resolved.test.keys +
+            resolved.kmp.keys).toSet()
+
+        return allModuleNames.map { moduleName ->
+            val moduleDir = resolved.moduleDirs[moduleName]
+            val sourceRoots = mutableListOf<Path>()
+            val testSourceRoots = mutableListOf<Path>()
+
+            if (moduleDir != null) {
+                addConventionalSourceRoots(moduleDir, sourceRoots, testSourceRoots)
+            }
+
+            val classpath = resolved.main[moduleName]?.toMutableList() ?: mutableListOf()
+            val testClasspath = resolved.test[moduleName]?.toMutableList() ?: mutableListOf()
+
+            val isAndroid = detectAndroid(moduleDir, classpath)
+            if (isAndroid && moduleDir != null) {
+                if (classpath.none { it.fileName.toString() == "android.jar" }) {
+                    findAndroidJar()?.let { classpath.add(it) }
+                }
+                addGeneratedSources(moduleDir, sourceRoots, variant)
+                addGeneratedClasspathJars(moduleDir, classpath, variant)
+            }
+
+            val isKmp = detectKmp(moduleDir)
+            val kmpTargets = if (isKmp && moduleDir != null) resolveKmpTargets(moduleDir) else emptyList()
+
+            // KMP modules: remove platform-specific source roots from module-level lists.
+            // They belong in KmpTarget.sourceRoots only — prevents leaking JS/Native
+            // sources into JVM sessions in mixed KMP/JVM projects.
+            if (isKmp) {
+                val platformSpecificPatterns = listOf(
+                    "/jvmMain/", "/jvmTest/", "/androidMain/", "/androidTest/",
+                    "/iosMain/", "/iosTest/", "/nativeMain/", "/nativeTest/",
+                    "/jsMain/", "/jsTest/", "/wasmJsMain/", "/wasmJsTest/",
+                    "/macosMain/", "/macosTest/", "/linuxMain/", "/linuxTest/",
+                    "/mingwMain/", "/mingwTest/"
+                )
+                sourceRoots.removeAll { root ->
+                    platformSpecificPatterns.any { root.toString().contains(it) }
+                }
+                testSourceRoots.removeAll { root ->
+                    platformSpecificPatterns.any { root.toString().contains(it) }
+                }
+            }
+
+            // KMP modules: add commonMain/commonTest to module-level source roots
+            // so they're available to all target sessions
+            if (isKmp && moduleDir != null) {
+                val existingPaths = (sourceRoots + testSourceRoots).map { it.normalize() }.toSet()
+                val commonMainDirs = listOf("src/commonMain/kotlin", "src/commonMain/java")
+                val commonTestDirs = listOf("src/commonTest/kotlin", "src/commonTest/java")
+                for (dir in commonMainDirs) {
+                    val path = moduleDir.resolve(dir)
+                    if (Files.isDirectory(path) && path.normalize() !in existingPaths) {
+                        sourceRoots.add(path)
+                    }
+                }
+                for (dir in commonTestDirs) {
+                    val path = moduleDir.resolve(dir)
+                    if (Files.isDirectory(path) && path.normalize() !in existingPaths) {
+                        testSourceRoots.add(path)
+                    }
+                }
+            }
+
+            // Merge KMP classpath from init script into targets
+            val finalTargets = if (kmpTargets.isNotEmpty()) {
+                val moduleKmp = resolved.kmp[moduleName]
+                if (moduleKmp != null) {
+                    kmpTargets.map { target ->
+                        val newEntries = mutableListOf<Path>()
+                        for ((configName, paths) in moduleKmp) {
+                            val platform = configNameToKmpPlatform(configName) ?: continue
+                            if (platform != target.platform) continue
+                            newEntries.addAll(paths)
+                        }
+                        if (newEntries.isNotEmpty()) target.copy(classpath = target.classpath + newEntries) else target
+                    }
+                } else kmpTargets
+            } else emptyList()
+
+            ModuleInfo(
+                name = moduleName,
+                sourceRoots = sourceRoots,
+                testSourceRoots = testSourceRoots,
+                classpath = classpath,
+                testClasspath = testClasspath,
+                kotlinVersion = null,
+                jvmTarget = null,
+                isAndroid = isAndroid,
+                targets = finalTargets
+            )
         }
     }
 

@@ -94,4 +94,87 @@ class BuildSystemResolverTest {
         assertEquals("manual", provider.id)
         assertEquals(1, model.modules.size)
     }
+
+    // --- discoverBuildRoots tests ---
+
+    @Test
+    fun `discovers single build root at workspace root`() {
+        Files.createFile(tempDir.resolve("settings.gradle.kts"))
+        Files.createFile(tempDir.resolve("build.gradle.kts"))
+
+        val resolver = BuildSystemResolver()
+        val roots = resolver.discoverBuildRoots(tempDir)
+        assertEquals(1, roots.size)
+        assertEquals("gradle", roots[0].first.id)
+        assertEquals(tempDir, roots[0].second)
+    }
+
+    @Test
+    fun `discovers multiple build roots in subdirectories`() {
+        // Create two independent Gradle builds in subdirectories
+        val buildA = Files.createDirectory(tempDir.resolve("project-a"))
+        Files.createFile(buildA.resolve("settings.gradle.kts"))
+        Files.createFile(buildA.resolve("build.gradle.kts"))
+
+        val buildB = Files.createDirectory(tempDir.resolve("project-b"))
+        Files.createFile(buildB.resolve("settings.gradle"))
+        Files.createFile(buildB.resolve("build.gradle"))
+
+        val resolver = BuildSystemResolver()
+        val roots = resolver.discoverBuildRoots(tempDir)
+        assertEquals(2, roots.size)
+        val rootDirs = roots.map { it.second }.toSet()
+        assertEquals(setOf(buildA, buildB), rootDirs)
+        roots.forEach { assertEquals("gradle", it.first.id) }
+    }
+
+    @Test
+    fun `skips build and gradle directories during discovery`() {
+        // Build root in a build/ directory should be skipped
+        val buildDir = Files.createDirectory(tempDir.resolve("build"))
+        Files.createFile(buildDir.resolve("settings.gradle.kts"))
+        Files.createFile(buildDir.resolve("build.gradle.kts"))
+
+        // Build root in .gradle/ should be skipped
+        val gradleDir = Files.createDirectory(tempDir.resolve(".gradle"))
+        Files.createFile(gradleDir.resolve("settings.gradle.kts"))
+        Files.createFile(gradleDir.resolve("build.gradle.kts"))
+
+        // Real build root
+        val realBuild = Files.createDirectory(tempDir.resolve("app"))
+        Files.createFile(realBuild.resolve("settings.gradle.kts"))
+        Files.createFile(realBuild.resolve("build.gradle.kts"))
+
+        val resolver = BuildSystemResolver()
+        val roots = resolver.discoverBuildRoots(tempDir)
+        assertEquals(1, roots.size)
+        assertEquals(realBuild, roots[0].second)
+    }
+
+    @Test
+    fun `falls back for empty workspace with no markers`() {
+        val resolver = BuildSystemResolver()
+        val roots = resolver.discoverBuildRoots(tempDir)
+        assertEquals(1, roots.size)
+        assertEquals("manual", roots[0].first.id)
+        assertEquals(tempDir, roots[0].second)
+    }
+
+    @Test
+    fun `does not recurse into subdirectories of a discovered build root`() {
+        // Root build
+        Files.createFile(tempDir.resolve("settings.gradle.kts"))
+        Files.createFile(tempDir.resolve("build.gradle.kts"))
+
+        // Subproject that also has settings.gradle.kts (should NOT be a separate root)
+        val subproject = Files.createDirectories(tempDir.resolve("subproject"))
+        Files.createFile(subproject.resolve("settings.gradle.kts"))
+        Files.createFile(subproject.resolve("build.gradle.kts"))
+
+        val resolver = BuildSystemResolver()
+        val roots = resolver.discoverBuildRoots(tempDir)
+        // Only the root should be discovered, not the subproject
+        assertEquals(1, roots.size)
+        assertEquals(tempDir, roots[0].second)
+    }
 }

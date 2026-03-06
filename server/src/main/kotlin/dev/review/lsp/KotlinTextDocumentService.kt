@@ -1,9 +1,11 @@
 package dev.review.lsp
 
 import dev.review.lsp.analysis.DiagnosticsPublisher
+import dev.review.lsp.analysis.WorkspaceManager
 import dev.review.lsp.compiler.CompilerFacade
 import dev.review.lsp.features.*
 import dev.review.lsp.util.UriUtil
+import kotlinx.coroutines.*
 import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.eclipse.lsp4j.jsonrpc.messages.Either3
@@ -20,6 +22,7 @@ class KotlinTextDocumentService : TextDocumentService {
     private var client: LanguageClient? = null
     @Volatile private var facade: CompilerFacade? = null
     @Volatile private var diagnosticsPublisher: DiagnosticsPublisher? = null
+    @Volatile private var workspaceManager: WorkspaceManager? = null
 
     // Document version tracking for stale analysis cancellation
     private val documentVersions = ConcurrentHashMap<String, Int>()
@@ -30,15 +33,18 @@ class KotlinTextDocumentService : TextDocumentService {
     }
     private val pendingDiagnostics = ConcurrentHashMap<String, ScheduledFuture<*>>()
 
+    // Coroutine scope for async multi-root operations
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
     var debounceMs: Long = 250L
 
-    // P0 providers
+    // P0 providers (single-root cached path)
     @Volatile private var definitionProvider: DefinitionProvider? = null
     @Volatile private var referencesProvider: ReferencesProvider? = null
     @Volatile private var hoverProvider: HoverProvider? = null
     @Volatile private var documentSymbolProvider: DocumentSymbolProvider? = null
 
-    // P1 providers
+    // P1 providers (single-root cached path)
     @Volatile private var implementationProvider: ImplementationProvider? = null
     @Volatile private var typeDefinitionProvider: TypeDefinitionProvider? = null
     @Volatile private var renameProvider: RenameProvider? = null
@@ -49,6 +55,7 @@ class KotlinTextDocumentService : TextDocumentService {
         this.client = client
     }
 
+    /** Single-root setup: cache providers for the one facade. */
     fun setAnalysis(facade: CompilerFacade, publisher: DiagnosticsPublisher, projectDir: java.nio.file.Path? = null) {
         this.facade = facade
         this.diagnosticsPublisher = publisher
@@ -65,8 +72,26 @@ class KotlinTextDocumentService : TextDocumentService {
         this.completionProvider = CompletionProvider(facade)
     }
 
+    /** Multi-root setup: set the workspace manager for dynamic facade resolution. */
+    fun setWorkspaceManager(wm: WorkspaceManager) {
+        this.workspaceManager = wm
+    }
+
+    /**
+     * Resolve the facade for a given URI. In single-root mode, returns the
+     * cached facade. In multi-root mode, resolves via WorkspaceManager.
+     */
+    private fun facadeForUri(uri: String): CompilerFacade? {
+        val wm = workspaceManager
+        if (wm != null && !wm.isSingleRoot()) {
+            return runBlocking { wm.facadeForFile(UriUtil.toPath(uri)) }
+        }
+        return facade
+    }
+
     fun shutdown() {
         debounceScheduler.shutdownNow()
+        scope.cancel()
     }
 
     // Document sync
@@ -76,6 +101,24 @@ class KotlinTextDocumentService : TextDocumentService {
         val version = params.textDocument.version
         documentVersions[uri] = version
         client?.logMessage(MessageParams(MessageType.Info, "Opened: $uri"))
+
+        val wm = workspaceManager
+        if (wm != null && !wm.isSingleRoot()) {
+            // Multi-root: resolve facade lazily, then publish diagnostics
+            scope.launch {
+                val f = wm.facadeForFile(UriUtil.toPath(uri))
+                if (f == null) {
+                    client?.logMessage(MessageParams(MessageType.Warning, "No build root found for: $uri"))
+                    return@launch
+                }
+                val path = UriUtil.toPath(uri)
+                f.updateFileContent(path, params.textDocument.text)
+                val c = client ?: return@launch
+                val publisher = DiagnosticsPublisher(f, c)
+                publisher.publishDiagnosticsAsync(path, uri, version) { documentVersions[uri] }
+            }
+            return
+        }
 
         val f = facade
         if (f == null) {
@@ -96,7 +139,7 @@ class KotlinTextDocumentService : TextDocumentService {
 
         documentVersions[uri] = version
 
-        val f = facade ?: return
+        val f = facadeForUri(uri) ?: return
         val path = UriUtil.toPath(uri)
         f.updateFileContent(path, content)
 
@@ -110,11 +153,34 @@ class KotlinTextDocumentService : TextDocumentService {
         documentVersions.remove(uri)
         pendingDiagnostics.remove(uri)?.cancel(false)
         diagnosticsPublisher?.clearDiagnostics(uri)
+        // Multi-root: create an ad-hoc publisher to clear diagnostics
+        if (workspaceManager != null && !workspaceManager!!.isSingleRoot()) {
+            val f = facadeForUri(uri)
+            if (f != null) {
+                val c = client ?: return
+                DiagnosticsPublisher(f, c).clearDiagnostics(uri)
+            }
+        }
     }
 
     override fun didSave(params: DidSaveTextDocumentParams) {
-        val f = facade ?: return
         val uri = params.textDocument.uri
+
+        val wm = workspaceManager
+        if (wm != null && !wm.isSingleRoot()) {
+            // Multi-root: refresh the correct facade
+            val f = facadeForUri(uri) ?: return
+            f.refreshAnalysis()
+            val path = UriUtil.toPath(uri)
+            val version = documentVersions[uri] ?: 0
+            val c = client ?: return
+            val publisher = DiagnosticsPublisher(f, c)
+            publisher.invalidateCache()
+            publisher.publishDiagnostics(path, uri, version) { documentVersions[uri] }
+            return
+        }
+
+        val f = facade ?: return
         val path = UriUtil.toPath(uri)
 
         // Rebuild session to pick up saved changes (PSI is immutable — ADR-16).
@@ -129,7 +195,8 @@ class KotlinTextDocumentService : TextDocumentService {
     // P0 features
 
     override fun definition(params: DefinitionParams): CompletableFuture<Either<List<Location>, List<LocationLink>>> {
-        return (definitionProvider?.definition(params)
+        val provider = definitionProvider ?: facadeForUri(params.textDocument.uri)?.let { DefinitionProvider(it) }
+        return (provider?.definition(params)
             ?: CompletableFuture.completedFuture(Either.forLeft(emptyList())))
             .exceptionally { e ->
                 System.err.println("[service] Error in definition: ${e.message}")
@@ -138,7 +205,8 @@ class KotlinTextDocumentService : TextDocumentService {
     }
 
     override fun references(params: ReferenceParams): CompletableFuture<List<Location>> {
-        return (referencesProvider?.references(params)
+        val provider = referencesProvider ?: facadeForUri(params.textDocument.uri)?.let { ReferencesProvider(it) }
+        return (provider?.references(params)
             ?: CompletableFuture.completedFuture(emptyList()))
             .exceptionally { e ->
                 System.err.println("[service] Error in references: ${e.message}")
@@ -147,7 +215,8 @@ class KotlinTextDocumentService : TextDocumentService {
     }
 
     override fun hover(params: HoverParams): CompletableFuture<Hover?> {
-        val future: CompletableFuture<Hover?> = hoverProvider?.hover(params)
+        val provider = hoverProvider ?: facadeForUri(params.textDocument.uri)?.let { HoverProvider(it) }
+        val future: CompletableFuture<Hover?> = provider?.hover(params)
             ?: CompletableFuture.completedFuture(null)
         return future.exceptionally { e ->
             System.err.println("[service] Error in hover: ${e.message}")
@@ -156,7 +225,7 @@ class KotlinTextDocumentService : TextDocumentService {
     }
 
     override fun documentSymbol(params: DocumentSymbolParams): CompletableFuture<List<Either<SymbolInformation, DocumentSymbol>>> {
-        val provider = documentSymbolProvider
+        val provider = documentSymbolProvider ?: facadeForUri(params.textDocument.uri)?.let { DocumentSymbolProvider(it) }
             ?: return CompletableFuture.completedFuture(emptyList())
 
         return provider.documentSymbol(params).thenApply { symbols ->
@@ -170,7 +239,8 @@ class KotlinTextDocumentService : TextDocumentService {
     // P1 features
 
     override fun implementation(params: ImplementationParams): CompletableFuture<Either<List<Location>, List<LocationLink>>> {
-        return (implementationProvider?.implementation(params)
+        val provider = implementationProvider ?: facadeForUri(params.textDocument.uri)?.let { ImplementationProvider(it) }
+        return (provider?.implementation(params)
             ?: CompletableFuture.completedFuture(Either.forLeft(emptyList())))
             .exceptionally { e ->
                 System.err.println("[service] Error in implementation: ${e.message}")
@@ -179,7 +249,8 @@ class KotlinTextDocumentService : TextDocumentService {
     }
 
     override fun typeDefinition(params: TypeDefinitionParams): CompletableFuture<Either<List<Location>, List<LocationLink>>> {
-        return (typeDefinitionProvider?.typeDefinition(params)
+        val provider = typeDefinitionProvider ?: facadeForUri(params.textDocument.uri)?.let { TypeDefinitionProvider(it) }
+        return (provider?.typeDefinition(params)
             ?: CompletableFuture.completedFuture(Either.forLeft(emptyList())))
             .exceptionally { e ->
                 System.err.println("[service] Error in typeDefinition: ${e.message}")
@@ -188,7 +259,8 @@ class KotlinTextDocumentService : TextDocumentService {
     }
 
     override fun prepareRename(params: PrepareRenameParams): CompletableFuture<Either3<Range, PrepareRenameResult, PrepareRenameDefaultBehavior>> {
-        val provider = renameProvider ?: return CompletableFuture.completedFuture(null)
+        val provider = renameProvider ?: facadeForUri(params.textDocument.uri)?.let { RenameProvider(it) }
+            ?: return CompletableFuture.completedFuture(null)
         val future: CompletableFuture<Either3<Range, PrepareRenameResult, PrepareRenameDefaultBehavior>?> =
             provider.prepareRename(params)
         return future.exceptionally { e ->
@@ -198,7 +270,8 @@ class KotlinTextDocumentService : TextDocumentService {
     }
 
     override fun rename(params: RenameParams): CompletableFuture<WorkspaceEdit?> {
-        val future: CompletableFuture<WorkspaceEdit?> = renameProvider?.rename(params)
+        val provider = renameProvider ?: facadeForUri(params.textDocument.uri)?.let { RenameProvider(it) }
+        val future: CompletableFuture<WorkspaceEdit?> = provider?.rename(params)
             ?: CompletableFuture.completedFuture(null)
         return future.exceptionally { e ->
             System.err.println("[service] Error in rename: ${e.message}")
@@ -207,8 +280,13 @@ class KotlinTextDocumentService : TextDocumentService {
     }
 
     override fun codeAction(params: CodeActionParams): CompletableFuture<List<Either<Command, CodeAction>>> {
-        return (codeActionProvider?.codeAction(params)
-            ?: CompletableFuture.completedFuture(emptyList()))
+        val provider = codeActionProvider ?: run {
+            val uri = params.textDocument.uri
+            val f = facadeForUri(uri) ?: return CompletableFuture.completedFuture(emptyList())
+            val model = workspaceManager?.modelForFile(UriUtil.toPath(uri))
+            CodeActionProvider(f, model?.projectDir)
+        }
+        return provider.codeAction(params)
             .exceptionally { e ->
                 System.err.println("[service] Error in codeAction: ${e.message}")
                 emptyList()
@@ -216,7 +294,8 @@ class KotlinTextDocumentService : TextDocumentService {
     }
 
     override fun completion(params: CompletionParams): CompletableFuture<Either<List<CompletionItem>, CompletionList>> {
-        return (completionProvider?.completion(params)
+        val provider = completionProvider ?: facadeForUri(params.textDocument.uri)?.let { CompletionProvider(it) }
+        return (provider?.completion(params)
             ?: CompletableFuture.completedFuture(Either.forLeft(emptyList())))
             .exceptionally { e ->
                 System.err.println("[service] Error in completion: ${e.message}")
