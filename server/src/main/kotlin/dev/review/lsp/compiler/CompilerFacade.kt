@@ -30,6 +30,9 @@ interface CompilerFacade {
 
     fun updateFileContent(file: Path, content: String)
 
+    /** Fast syntax-only diagnostics from PSI parsing. No FIR, no analysis thread. */
+    fun getSyntaxDiagnostics(file: Path): List<DiagnosticInfo> = emptyList()
+
     /** Rebuild the analysis session from disk. Called on file save. */
     fun refreshAnalysis() {}
 

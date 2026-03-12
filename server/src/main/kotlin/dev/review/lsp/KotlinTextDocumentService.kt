@@ -34,10 +34,17 @@ class KotlinTextDocumentService : TextDocumentService {
     private val pendingDocuments = ConcurrentHashMap<String, String>()
 
     // Debounce scheduler for didChange diagnostics
-    private val debounceScheduler = Executors.newSingleThreadScheduledExecutor { r ->
+    private val debounceScheduler = Executors.newScheduledThreadPool(2) { r ->
         Thread(r, "diagnostics-debounce").apply { isDaemon = true }
     }
     private val pendingDiagnostics = ConcurrentHashMap<String, ScheduledFuture<*>>()
+
+    // Two-tier diagnostics: Tier 1 (syntax, 300ms) and Tier 2 (semantic rebuild, 2000ms)
+    private val pendingTier1 = ConcurrentHashMap<String, ScheduledFuture<*>>()
+    private val pendingTier2 = ConcurrentHashMap<String, ScheduledFuture<*>>()
+
+    // Last-saved file content for staleness comparison in Tier 1 merge
+    private val lastSavedContent = ConcurrentHashMap<String, String>()
 
     // Coroutine scope for async multi-root operations
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -169,6 +176,7 @@ class KotlinTextDocumentService : TextDocumentService {
         }
         val path = UriUtil.toPath(uri)
         f.updateFileContent(path, params.textDocument.text)
+        lastSavedContent[uri] = params.textDocument.text
         // Publish diagnostics asynchronously — serves cached results immediately,
         // computes fresh in background without blocking hover/completion
         diagnosticsPublisher?.publishDiagnosticsAsync(path, uri, version) { documentVersions[uri] }
@@ -190,16 +198,47 @@ class KotlinTextDocumentService : TextDocumentService {
         val path = UriUtil.toPath(uri)
         f.updateFileContent(path, content)
 
-        // No diagnostics on didChange — the Analysis API session is immutable (ADR-16),
-        // so collectDiagnostics returns the same results until the next save/rebuild.
-        // This avoids blocking the analysis thread on every keystroke.
+        val publisher = diagnosticsPublisher ?: return
+
+        // Cancel any pending debounced diagnostics for this file
+        pendingTier1.remove(uri)?.cancel(false)
+        pendingTier2.remove(uri)?.cancel(false)
+
+        // Tier 1: syntax-only diagnostics (300ms debounce, off analysis thread)
+        val currentContent = content
+        val savedContent = lastSavedContent[uri]
+        pendingTier1[uri] = debounceScheduler.schedule({
+            try {
+                val epoch = publisher.bumpEpoch(path)
+                val syntaxErrors = f.getSyntaxDiagnostics(path)
+                publisher.publishMerged(path, uri, syntaxErrors, epoch, currentContent, savedContent)
+            } catch (e: Exception) {
+                System.err.println("[tier1] Syntax parse failed for $uri: ${e.message}")
+            }
+        }, 300, TimeUnit.MILLISECONDS)
+
+        // Tier 2: full semantic diagnostics (2000ms debounce, triggers session rebuild)
+        pendingTier2[uri] = debounceScheduler.schedule({
+            try {
+                val epoch = publisher.bumpEpoch(path)
+                f.refreshAnalysis()
+                publisher.invalidateCacheForFile(path)
+                val freshDiagnostics = f.getDiagnostics(path)
+                publisher.updateCacheAndPublish(path, uri, freshDiagnostics, epoch)
+            } catch (e: Exception) {
+                System.err.println("[tier2] Semantic analysis failed for $uri: ${e.message}")
+            }
+        }, 2000, TimeUnit.MILLISECONDS)
     }
 
     override fun didClose(params: DidCloseTextDocumentParams) {
         val uri = params.textDocument.uri
         documentVersions.remove(uri)
         pendingDocuments.remove(uri)
+        lastSavedContent.remove(uri)
         pendingDiagnostics.remove(uri)?.cancel(false)
+        pendingTier1.remove(uri)?.cancel(false)
+        pendingTier2.remove(uri)?.cancel(false)
         diagnosticsPublisher?.clearDiagnostics(uri)
         // Multi-root: create an ad-hoc publisher to clear diagnostics
         if (workspaceManager != null && !workspaceManager!!.isSingleRoot()) {
@@ -214,12 +253,21 @@ class KotlinTextDocumentService : TextDocumentService {
     override fun didSave(params: DidSaveTextDocumentParams) {
         val uri = params.textDocument.uri
 
+        // Cancel pending tier diagnostics — didSave does its own authoritative rebuild
+        pendingTier1.remove(uri)?.cancel(false)
+        pendingTier2.remove(uri)?.cancel(false)
+
+        // Update last-saved content baseline for Tier 1 staleness checks
+        val path = UriUtil.toPath(uri)
+        try {
+            lastSavedContent[uri] = java.nio.file.Files.readString(path)
+        } catch (_: Exception) { }
+
         val wm = workspaceManager
         if (wm != null && !wm.isSingleRoot()) {
             // Multi-root: refresh the correct facade
             val f = facadeForUri(uri) ?: return
             f.refreshAnalysis()
-            val path = UriUtil.toPath(uri)
             val version = documentVersions[uri] ?: 0
             val c = client ?: return
             val publisher = DiagnosticsPublisher(f, c)
@@ -229,7 +277,6 @@ class KotlinTextDocumentService : TextDocumentService {
         }
 
         val f = facade ?: return
-        val path = UriUtil.toPath(uri)
 
         // Rebuild session to pick up saved changes (PSI is immutable — ADR-16).
         // refreshAnalysis() has a 5s cooldown to avoid auto-save cascades.

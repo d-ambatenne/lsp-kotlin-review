@@ -1,5 +1,6 @@
 package dev.review.lsp.compiler.analysisapi
 
+import dev.review.lsp.analysis.SyntaxParser
 import dev.review.lsp.buildsystem.KmpPlatform
 import dev.review.lsp.buildsystem.ProjectModel
 import dev.review.lsp.compiler.*
@@ -73,9 +74,22 @@ class AnalysisApiCompilerFacade(
     // Cache for library stub files: FQN -> (stubPath, lineNumber for the class/member declaration)
     private val libraryStubCache = ConcurrentHashMap<String, SourceLocation>()
 
+    private val syntaxParser = SyntaxParser()
+
     init {
         sessions = buildSessions()
         System.err.println("[session] Sessions built: ${sessions.keys.map { it.name }} (${sessions.size} total)")
+        initSyntaxParser()
+    }
+
+    private fun initSyntaxParser() {
+        val project = allKtFiles().firstOrNull()?.project ?: return
+        syntaxParser.setProject(project)
+    }
+
+    override fun getSyntaxDiagnostics(file: Path): List<DiagnosticInfo> {
+        val content = fileContents[file] ?: return emptyList()
+        return syntaxParser.parseSyntaxErrors(content, file)
     }
 
     /** Extract classes.jar from an AAR file to a temp directory. */
@@ -1673,6 +1687,7 @@ class AnalysisApiCompilerFacade(
                 System.gc()
                 sessions = buildSessions()
             }
+            initSyntaxParser()
         } catch (e: Exception) {
             System.err.println("Session rebuild failed: ${e.message}")
         } finally {
