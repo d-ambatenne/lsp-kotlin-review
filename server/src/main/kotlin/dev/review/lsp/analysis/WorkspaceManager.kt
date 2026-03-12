@@ -136,6 +136,13 @@ class WorkspaceManager(
     }
 
     /**
+     * Check if a build root has been resolved (session created).
+     */
+    fun isRootResolved(rootDir: Path): Boolean {
+        return buildRoots[rootDir.normalize()]?.session != null
+    }
+
+    /**
      * True if the workspace has exactly one build root (the common case).
      * When true, callers can use the single-root fast path.
      */

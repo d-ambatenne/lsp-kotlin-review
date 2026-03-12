@@ -4,6 +4,7 @@ import dev.review.lsp.analysis.AnalysisSession
 import dev.review.lsp.analysis.DiagnosticsPublisher
 import dev.review.lsp.analysis.WorkspaceManager
 import dev.review.lsp.buildsystem.BuildSystemResolver
+import dev.review.lsp.util.ProgressReporter
 import dev.review.lsp.util.UriUtil
 import kotlinx.coroutines.*
 import org.eclipse.lsp4j.*
@@ -30,8 +31,12 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
         Thread(r, "rebuild-debounce").apply { isDaemon = true }
     }
     @Volatile private var pendingRebuild: ScheduledFuture<*>? = null
+    @Volatile private var heapWarningShown = false
+    private var heapMonitor: ScheduledFuture<*>? = null
     private companion object {
         const val REBUILD_DEBOUNCE_MS = 2000L // 2s — batches burst of generated file events
+        const val HEAP_CHECK_INTERVAL_S = 30L
+        const val HEAP_WARNING_THRESHOLD = 0.85 // 85%
     }
 
     override fun initialize(params: InitializeParams): CompletableFuture<InitializeResult> {
@@ -64,7 +69,12 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
 
         val root = workspaceRoot ?: return
         scope.launch {
+            val c = client
+            val progress = c?.let { ProgressReporter(it) }
             try {
+                progress?.create("kotlin-review-init")
+                progress?.begin("Kotlin Review", "Discovering build roots...", 0)
+
                 val rp = Paths.get(java.net.URI.create(root))
                 rootPath = rp
 
@@ -78,19 +88,26 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
                     val singleRoot = wm.singleRoot()
                     log(MessageType.Info, "Single build root: ${singleRoot.rootDir}")
 
+                    progress?.report("Resolving Gradle project model...", 20)
                     val facade = wm.resolveRoot(singleRoot.rootDir)
                     if (facade == null) {
                         log(MessageType.Error, "Failed to resolve build root")
+                        progress?.end("Failed to resolve project")
                         return@launch
                     }
-                    val model = singleRoot.model ?: return@launch
+                    val model = singleRoot.model ?: run {
+                        progress?.end("Failed to resolve project")
+                        return@launch
+                    }
 
-                    val c = client ?: return@launch
-                    val publisher = DiagnosticsPublisher(facade, c)
+                    progress?.report("Building analysis sessions...", 70)
+                    val lc = c ?: return@launch
+                    val publisher = DiagnosticsPublisher(facade, lc)
                     textDocumentService.setAnalysis(facade, publisher, model.projectDir)
 
+                    progress?.end("Ready (${model.modules.size} modules)")
                     log(MessageType.Info, "Analysis session ready (${model.modules.size} module(s))")
-                    checkAndroidBuildHint(model, c)
+                    checkAndroidBuildHint(model, lc)
                 } else {
                     // Multi root: set workspace manager on text doc service, resolve lazily
                     log(MessageType.Info, "Multi-root workspace: ${wm.allRoots().size} build roots")
@@ -98,6 +115,7 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
                         log(MessageType.Info, "  Build root: $rootDir")
                     }
                     textDocumentService.setWorkspaceManager(wm)
+                    progress?.end("Ready (${wm.allRoots().size} build roots)")
                 }
 
                 // Wire up workspace service callbacks — debounced to batch rapid changes
@@ -107,8 +125,12 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
 
                 // Register file watchers for build files
                 registerFileWatchers()
+
+                // Start heap usage monitor
+                startHeapMonitor()
             } catch (e: Exception) {
                 log(MessageType.Error, "Failed to initialize analysis: ${e.message}")
+                progress?.end("Initialization failed")
             }
         }
     }
@@ -155,6 +177,34 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
         }
     }
 
+    private fun startHeapMonitor() {
+        heapMonitor = rebuildScheduler.scheduleAtFixedRate({
+            try {
+                checkHeapUsage()
+            } catch (_: Exception) { /* don't crash the scheduler */ }
+        }, HEAP_CHECK_INTERVAL_S, HEAP_CHECK_INTERVAL_S, TimeUnit.SECONDS)
+    }
+
+    private fun checkHeapUsage() {
+        if (heapWarningShown) return
+        val rt = Runtime.getRuntime()
+        val maxHeap = rt.maxMemory()
+        val usedHeap = rt.totalMemory() - rt.freeMemory()
+        val usage = usedHeap.toDouble() / maxHeap.toDouble()
+        if (usage >= HEAP_WARNING_THRESHOLD) {
+            heapWarningShown = true
+            val usedMb = usedHeap / (1024 * 1024)
+            val maxMb = maxHeap / (1024 * 1024)
+            val c = client ?: return
+            c.showMessage(MessageParams(
+                MessageType.Warning,
+                "Kotlin Review: heap usage is high (${usedMb}MB / ${maxMb}MB). " +
+                    "Consider increasing memory via Settings > Kotlin Review > Server: JVM Args, " +
+                    "e.g. add \"-Xmx6g\". Restart VS Code after changing."
+            ))
+        }
+    }
+
     private fun scheduleRebuild(changedUri: String?) {
         pendingRebuild?.cancel(false)
         pendingRebuild = rebuildScheduler.schedule({
@@ -165,7 +215,12 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
     private fun rebuildForUri(changedUri: String?) {
         val wm = workspaceManager ?: return
         scope.launch {
+            val c = client
+            val progress = c?.let { ProgressReporter(it) }
             try {
+                progress?.create()
+                progress?.begin("Kotlin Review", "Rebuilding analysis...")
+
                 // Determine which build root to rebuild
                 val targetRoot = if (changedUri != null) {
                     try {
@@ -174,14 +229,22 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
                     } catch (_: Exception) { null }
                 } else null
 
+                heapWarningShown = false // reset so warning can fire again after rebuild
+
                 if (wm.isSingleRoot()) {
                     // Single root: rebuild the one root
                     val rootDir = wm.singleRoot().rootDir
                     log(MessageType.Info, "Rebuilding analysis session (variant: $buildVariant)...")
-                    val newFacade = wm.rebuildRoot(rootDir) ?: return@launch
-                    val model = wm.singleRoot().model ?: return@launch
-                    val c = client ?: return@launch
-                    val publisher = DiagnosticsPublisher(newFacade, c)
+                    val newFacade = wm.rebuildRoot(rootDir) ?: run {
+                        progress?.end("Rebuild failed")
+                        return@launch
+                    }
+                    val model = wm.singleRoot().model ?: run {
+                        progress?.end("Rebuild failed")
+                        return@launch
+                    }
+                    val lc = c ?: return@launch
+                    val publisher = DiagnosticsPublisher(newFacade, lc)
                     textDocumentService.setAnalysis(newFacade, publisher, model.projectDir)
                     log(MessageType.Info, "Analysis session rebuilt (${model.modules.size} module(s))")
                 } else if (targetRoot != null) {
@@ -197,13 +260,16 @@ class KotlinLanguageServer : LanguageServer, LanguageClientAware {
                     }
                     log(MessageType.Info, "All build roots rebuilt")
                 }
+                progress?.end("Rebuild complete")
             } catch (e: Exception) {
                 log(MessageType.Error, "Failed to rebuild analysis session: ${e.message}")
+                progress?.end("Rebuild failed")
             }
         }
     }
 
     override fun shutdown(): CompletableFuture<Any> {
+        heapMonitor?.cancel(false)
         pendingRebuild?.cancel(false)
         rebuildScheduler.shutdownNow()
         textDocumentService.shutdown()

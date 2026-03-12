@@ -235,3 +235,14 @@ The only reliable path is `_session = buildSession()` which re-reads all files f
 - `BuildSystemResolver` becomes responsible for discovering and selecting build roots, not just picking one provider/directory pair
 - A workspace-level routing layer becomes part of the server architecture
 - This provides a correct foundation for supporting repositories like `compose-multiplatform` from the repository root
+
+## ADR-28: Future — Disk-Backed Index for Scalable Memory Usage (PARKED)
+**Status**: Parked for future consideration. Not planned for current release.
+**Decision**: Document the long-term architecture for replacing in-memory K2 FIR sessions with a disk-backed index, similar to IntelliJ's `FileBasedIndex` + `StubIndex` pattern.
+**Problem**: The K2 Standalone Analysis API builds monolithic FIR sessions that hold all source files and classpath FIR trees in heap memory. Each platform session for a KMP project consumes 400-600 MB. Projects with 4+ platform targets can exhaust 4 GB heap, especially during session rebuilds when old and new sessions temporarily coexist.
+**Proposed architecture** (three options explored):
+1. **Option A — Custom PSI-only index**: Parse each file to PSI (cheap), extract declarations/references/types into a serializable index (e.g. SQLite). Query index for navigation/symbols/references. Only invoke full FIR for type-sensitive operations on the active file. *Tradeoff*: Loses type resolution for navigation.
+2. **Option B — IntelliJ index infrastructure**: Use IntelliJ's `FileBasedIndex` + `StubIndex` with PSI stubs serialized to disk and loaded lazily. *Tradeoff*: Requires full IntelliJ platform runtime (~200 MB); project becomes an IntelliJ plugin rather than a standalone LSP server.
+3. **Option C — Hybrid (recommended)**: Build a PSI-only index for all files persisted to disk. Create FIR sessions scoped to a single file + direct dependencies for diagnostics/hover on the active file. Memory: ~50 MB for PSI index + ~200 MB for one active FIR session. *Tradeoff*: K2 compiler team has not exposed single-file FIR analysis in the standalone API; would require wrapping internal compiler APIs that change between Kotlin releases.
+**Why parked**: The current approach (4 GB default heap + heap usage monitoring + future lazy session loading) is sufficient for typical KMP apps (2-4 targets). The disk-backed approach becomes essential for large monorepos (10+ modules, 1000+ files) or library projects targeting 6+ KMP platforms — a scale the extension does not currently target.
+**Trigger to revisit**: OOM reports on projects with 6+ platform targets, or a desire to support large monorepos with minimal memory footprint.

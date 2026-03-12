@@ -63,7 +63,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const jarPath = path.join(context.extensionPath, "server", "server-all.jar");
 
   const defaultJvmArgs = [
-    "-Xmx2g",
+    "-Xmx4g",
     "-XX:+UseG1GC",
   ];
   const userJvmArgs = getServerJvmArgs();

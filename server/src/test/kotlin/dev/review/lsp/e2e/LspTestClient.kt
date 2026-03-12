@@ -46,6 +46,9 @@ class LspTestClient(
             }
             override fun registerCapability(params: RegistrationParams): CompletableFuture<Void> =
                 CompletableFuture.completedFuture(null)
+            override fun createProgress(params: WorkDoneProgressCreateParams): CompletableFuture<Void> =
+                CompletableFuture.completedFuture(null)
+            override fun notifyProgress(params: ProgressParams) {}
         }
 
         launcher = LSPLauncher.createClientLauncher(client, process.inputStream, process.outputStream)

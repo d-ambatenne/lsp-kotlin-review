@@ -4,6 +4,7 @@ import dev.review.lsp.analysis.DiagnosticsPublisher
 import dev.review.lsp.analysis.WorkspaceManager
 import dev.review.lsp.compiler.CompilerFacade
 import dev.review.lsp.features.*
+import dev.review.lsp.util.ProgressReporter
 import dev.review.lsp.util.UriUtil
 import kotlinx.coroutines.*
 import org.eclipse.lsp4j.*
@@ -24,8 +25,13 @@ class KotlinTextDocumentService : TextDocumentService {
     @Volatile private var diagnosticsPublisher: DiagnosticsPublisher? = null
     @Volatile private var workspaceManager: WorkspaceManager? = null
 
+    @Volatile private var notReadyMessageShown = false
+
     // Document version tracking for stale analysis cancellation
     private val documentVersions = ConcurrentHashMap<String, Int>()
+
+    // Documents opened before the facade was ready — replay diagnostics when analysis starts
+    private val pendingDocuments = ConcurrentHashMap<String, String>()
 
     // Debounce scheduler for didChange diagnostics
     private val debounceScheduler = Executors.newSingleThreadScheduledExecutor { r ->
@@ -59,6 +65,7 @@ class KotlinTextDocumentService : TextDocumentService {
     fun setAnalysis(facade: CompilerFacade, publisher: DiagnosticsPublisher, projectDir: java.nio.file.Path? = null) {
         this.facade = facade
         this.diagnosticsPublisher = publisher
+        this.notReadyMessageShown = false
         // P0
         this.definitionProvider = DefinitionProvider(facade)
         this.referencesProvider = ReferencesProvider(facade)
@@ -70,6 +77,19 @@ class KotlinTextDocumentService : TextDocumentService {
         this.renameProvider = RenameProvider(facade)
         this.codeActionProvider = CodeActionProvider(facade, projectDir)
         this.completionProvider = CompletionProvider(facade)
+
+        // Replay diagnostics for documents opened before the facade was ready
+        val pending = pendingDocuments.toMap()
+        pendingDocuments.clear()
+        if (pending.isNotEmpty()) {
+            client?.logMessage(MessageParams(MessageType.Info, "Publishing diagnostics for ${pending.size} pre-opened file(s)"))
+            for ((uri, content) in pending) {
+                val version = documentVersions[uri] ?: continue
+                val path = UriUtil.toPath(uri)
+                facade.updateFileContent(path, content)
+                publisher.publishDiagnosticsAsync(path, uri, version) { documentVersions[uri] }
+            }
+        }
     }
 
     /** Multi-root setup: set the workspace manager for dynamic facade resolution. */
@@ -106,14 +126,28 @@ class KotlinTextDocumentService : TextDocumentService {
         if (wm != null && !wm.isSingleRoot()) {
             // Multi-root: resolve facade lazily, then publish diagnostics
             scope.launch {
-                val f = wm.facadeForFile(UriUtil.toPath(uri))
+                val c = client ?: return@launch
+                val filePath = UriUtil.toPath(uri)
+                val rootDir = wm.buildRootForFile(filePath)
+                val needsResolve = rootDir != null && !wm.isRootResolved(rootDir)
+
+                val progress = if (needsResolve) {
+                    ProgressReporter(c).also {
+                        it.create()
+                        it.begin("Kotlin Review", "Analyzing ${rootDir?.fileName ?: "project"}...")
+                    }
+                } else null
+
+                val f = wm.facadeForFile(filePath)
                 if (f == null) {
                     client?.logMessage(MessageParams(MessageType.Warning, "No build root found for: $uri"))
+                    progress?.end("Resolution failed")
                     return@launch
                 }
+                progress?.end("Ready")
+
                 val path = UriUtil.toPath(uri)
                 f.updateFileContent(path, params.textDocument.text)
-                val c = client ?: return@launch
                 val publisher = DiagnosticsPublisher(f, c)
                 publisher.publishDiagnosticsAsync(path, uri, version) { documentVersions[uri] }
             }
@@ -123,6 +157,14 @@ class KotlinTextDocumentService : TextDocumentService {
         val f = facade
         if (f == null) {
             client?.logMessage(MessageParams(MessageType.Warning, "Facade not ready for: $uri"))
+            pendingDocuments[uri] = params.textDocument.text
+            if (!notReadyMessageShown) {
+                notReadyMessageShown = true
+                client?.showMessage(MessageParams(
+                    MessageType.Info,
+                    "Kotlin Review is still loading. Language features will be available shortly."
+                ))
+            }
             return
         }
         val path = UriUtil.toPath(uri)
@@ -139,6 +181,11 @@ class KotlinTextDocumentService : TextDocumentService {
 
         documentVersions[uri] = version
 
+        // Keep pending content up to date if facade isn't ready yet
+        if (pendingDocuments.containsKey(uri)) {
+            pendingDocuments[uri] = content
+        }
+
         val f = facadeForUri(uri) ?: return
         val path = UriUtil.toPath(uri)
         f.updateFileContent(path, content)
@@ -151,6 +198,7 @@ class KotlinTextDocumentService : TextDocumentService {
     override fun didClose(params: DidCloseTextDocumentParams) {
         val uri = params.textDocument.uri
         documentVersions.remove(uri)
+        pendingDocuments.remove(uri)
         pendingDiagnostics.remove(uri)?.cancel(false)
         diagnosticsPublisher?.clearDiagnostics(uri)
         // Multi-root: create an ad-hoc publisher to clear diagnostics
