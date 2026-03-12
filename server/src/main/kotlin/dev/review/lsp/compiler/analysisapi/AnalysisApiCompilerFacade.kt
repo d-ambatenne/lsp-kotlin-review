@@ -75,6 +75,7 @@ class AnalysisApiCompilerFacade(
 
     init {
         sessions = buildSessions()
+        System.err.println("[session] Sessions built: ${sessions.keys.map { it.name }} (${sessions.size} total)")
     }
 
     /** Extract classes.jar from an AAR file to a temp directory. */
@@ -101,17 +102,21 @@ class AnalysisApiCompilerFacade(
         classpathJars: List<Path>,
         includeJdk: Boolean
     ): org.jetbrains.kotlin.analysis.api.standalone.StandaloneAnalysisAPISession {
-        // Separate klib files from regular JARs — generate stubs for klibs (cached)
         val klibFiles = classpathJars.filter { it.toString().endsWith(".klib") }
         val nonKlibEntries = classpathJars.filter { !it.toString().endsWith(".klib") }
 
-        val klibStubRoots = if (klibFiles.isNotEmpty()) {
+        // For non-JVM platforms: try adding klibs as native library binary roots first.
+        // The K2 Analysis API has built-in klib deserialization support.
+        // Fall back to stub generation only for JVM sessions (where klib binary roots aren't supported).
+        val useKlibBinaryRoots = !includeJdk && klibFiles.isNotEmpty()
+
+        // Generate stubs only for JVM/Android sessions that need klib content
+        val klibStubRoots = if (!useKlibBinaryRoots && klibFiles.isNotEmpty()) {
             val deduped = klibFiles.groupBy { klib ->
                 klib.fileName.toString()
                     .replace(Regex("(Arm64|SimArm64|X64|SimulatorArm64|iosArm64|iosSimulatorArm64|iosX64|uikitArm64|uikitSimArm64)"), "")
             }.map { it.value.first() }
 
-            // Cache key: sorted list of klib filenames
             val cacheKey = deduped.map { it.fileName.toString() }.sorted().joinToString(",")
             klibStubCache.getOrPut(cacheKey) {
                 val stubGen = KlibStubGenerator()
@@ -140,7 +145,11 @@ class AnalysisApiCompilerFacade(
             }
         }
         val aarCount = nonKlibEntries.count { it.toString().endsWith(".aar") }
-        System.err.println("[session] Classpath: ${nonKlibEntries.size} entries ($aarCount AARs extracted), ${allClasspath.size} JARs total${if (klibStubRoots.isNotEmpty()) ", ${klibStubRoots.size} klib stub roots" else ""}")
+        if (useKlibBinaryRoots) {
+            System.err.println("[session] Classpath: ${nonKlibEntries.size} non-klib entries ($aarCount AARs), ${klibFiles.size} klibs as binary library roots")
+        } else {
+            System.err.println("[session] Classpath: ${nonKlibEntries.size} entries ($aarCount AARs extracted), ${allClasspath.size} JARs total${if (klibStubRoots.isNotEmpty()) ", ${klibStubRoots.size} klib stub roots" else ""}")
+        }
 
         return buildStandaloneAnalysisAPISession {
             buildKtModuleProvider {
@@ -154,6 +163,18 @@ class AnalysisApiCompilerFacade(
                         addBinaryRoot(absoluteJar)
                     })
                 }
+
+                // Add klib files as native library modules (JS/Native platforms)
+                val klibLibraryModules = if (useKlibBinaryRoots) {
+                    klibFiles.map { klib ->
+                        val absoluteKlib = klib.toAbsolutePath()
+                        addModule(buildKtLibraryModule {
+                            this.platform = targetPlatform
+                            libraryName = absoluteKlib.fileName.toString()
+                            addBinaryRoot(absoluteKlib)
+                        })
+                    }
+                } else emptyList()
 
                 val sdkModule = if (includeJdk) {
                     addModule(buildKtSdkModule {
@@ -172,7 +193,7 @@ class AnalysisApiCompilerFacade(
                     for (root in sourceRoots) {
                         addSourceRoot(root)
                     }
-                    // Add klib-generated stub directories as additional source roots
+                    // Add klib stubs as source roots (JVM/Android fallback only)
                     for (stubRoot in klibStubRoots) {
                         addSourceRoot(stubRoot)
                     }
@@ -180,6 +201,9 @@ class AnalysisApiCompilerFacade(
                         addRegularDependency(sdkModule)
                     }
                     for (lib in libraryModules) {
+                        addRegularDependency(lib)
+                    }
+                    for (lib in klibLibraryModules) {
                         addRegularDependency(lib)
                     }
                 })
@@ -238,19 +262,27 @@ class AnalysisApiCompilerFacade(
             val targetSourceRoots = targets.flatMap { it.sourceRoots + it.testSourceRoots }
             val sourceRoots = (kmpSourceRoots + targetSourceRoots).toMutableList()
 
-            val kmpClasspath = kmpModules.flatMap { it.classpath + it.testClasspath }
             val targetClasspath = targets.flatMap { it.classpath + it.testClasspath }
-            val classpath = (kmpClasspath + targetClasspath).toMutableList()
+            val classpath = targetClasspath.toMutableList()
 
-            // For JVM/Android: also include non-KMP modules (they're JVM by default)
+            // For JVM/Android: include module-level classpath (JVM JARs) and non-KMP modules.
+            // For JS/Native: module-level classpath is JVM-oriented (kotlin-stdlib.jar, AARs)
+            // and conflicts with platform-specific klib stubs — only use target classpath.
             if (platform == KmpPlatform.JVM || platform == KmpPlatform.ANDROID) {
+                classpath.addAll(kmpModules.flatMap { it.classpath + it.testClasspath })
                 sourceRoots.addAll(nonKmpModules.flatMap { it.sourceRoots + it.testSourceRoots })
                 classpath.addAll(nonKmpModules.flatMap { it.classpath + it.testClasspath })
             }
 
             val includeJdk = platform == KmpPlatform.JVM || platform == KmpPlatform.ANDROID
-            System.err.println("[session] Building $platform session: ${sourceRoots.distinct().size} source roots, ${classpath.distinct().size} classpath entries")
-            result[platform] = buildSingleSession(platformTypeFor(platform), sourceRoots.distinct(), classpath.distinct(), includeJdk)
+            val klibCount = classpath.distinct().count { it.toString().endsWith(".klib") }
+            System.err.println("[session] Building $platform session: ${sourceRoots.distinct().size} source roots, ${classpath.distinct().size} classpath entries ($klibCount klibs)")
+            try {
+                result[platform] = buildSingleSession(platformTypeFor(platform), sourceRoots.distinct(), classpath.distinct(), includeJdk)
+            } catch (e: Exception) {
+                System.err.println("[session] FAILED to build $platform session: ${e.message}")
+                e.printStackTrace(System.err)
+            }
         }
 
         // Ensure JVM session exists for non-KMP modules in mixed projects
